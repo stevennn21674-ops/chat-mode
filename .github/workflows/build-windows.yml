@@ -1,0 +1,77 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      # Optional. When set, the build seals this key as a fallback. The app
+      # still builds and runs when the secret is missing; users enter a key
+      # in Settings, where it is encrypted with Windows DPAPI.
+      AGNES_API_KEY: ${{ secrets.AGNES_API_KEY }}
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+          cache: npm
+
+      - name: Cache the speech model and binary
+        uses: actions/cache@v4
+        with:
+          path: resources/whisper
+          key: whisper-b5454-tiny-en-${{ runner.os }}-x64
+
+      - name: Install
+        run: npm ci
+
+      - name: Download the on-device speech model
+        run: node scripts/fetch-whisper.mjs
+
+      - name: Test
+        run: npm test
+
+      - name: Build installer and portable app
+        run: npm run dist:win
+
+      - name: Zip the portable app
+        shell: pwsh
+        run: |
+          $exes = @(Get-ChildItem -Path release -Filter "*.exe")
+          $portable = $exes | Where-Object { $_.Name -like "*portable*" } | Select-Object -First 1
+          $setup = $exes | Where-Object { $_.Name -notlike "*portable*" } | Select-Object -First 1
+          if (-not $portable) { throw "Portable exe was not produced" }
+          if (-not $setup) { throw "NSIS installer was not produced" }
+          Compress-Archive -Path $portable.FullName -DestinationPath "release/ChatMode-portable.zip" -Force
+          Write-Host "Installer: $($setup.Name)"
+          Write-Host "Portable: $($portable.Name)"
+
+      - name: Upload installer and portable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat-mode-windows
+          if-no-files-found: error
+          path: |
+            release/*.exe
+            release/*.zip
+
+      - name: Attach builds to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.exe
+            release/*.zip
+          generate_release_notes: true

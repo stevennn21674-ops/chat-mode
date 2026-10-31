@@ -1,0 +1,48 @@
+appId: com.chatmode.desktop
+productName: Chat Mode
+copyright: Copyright © 2026
+npmRebuild: false
+directories:
+  output: release
+  buildResources: build
+files:
+  - "!src/**"
+  - "!tests/**"
+  - "!scripts/**"
+  - "!docs/**"
+  - "!proxy/**"
+  - "!**/*.map"
+  - "!**/*.md"
+  - "!{.env,.env.example,tsconfig.json,vitest.config.ts,electron.vite.config.ts}"
+extraResources:
+  - from: resources/whisper
+    to: whisper
+    filter:
+      - "**/*"
+      - "!**/.gitkeep"
+  - from: resources/icons
+    to: icons
+asarUnpack:
+  - "**/*.node"
+  - "**/node_modules/uiohook-napi/**"
+win:
+  signAndEditExecutable: false
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  icon: build/icon.ico
+  artifactName: ChatMode-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: Chat Mode
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+portable:
+  artifactName: ChatMode-${version}-portable.${ext}

@@ -1,0 +1,35 @@
+{
+  "name": "chat-mode",
+  "version": "1.0.0",
+  "description": "Always-on-top viewer chat that reacts to your screen and what you say.",
+  "main": "./out/main/index.js",
+  "type": "module",
+  "private": true,
+  "author": "Chat Mode",
+  "scripts": {
+    "bake": "node --experimental-strip-types scripts/bake-secret.ts",
+    "icons": "node scripts/generate-icon.mjs",
+    "fetch-whisper": "node scripts/fetch-whisper.mjs",
+    "predev": "node --experimental-strip-types scripts/bake-secret.ts && node scripts/generate-icon.mjs",
+    "dev": "electron-vite dev",
+    "prebuild": "node --experimental-strip-types scripts/bake-secret.ts && node scripts/generate-icon.mjs",
+    "build": "electron-vite build",
+    "postbuild": "node scripts/scan-bundle.mjs",
+    "pretypecheck": "node --experimental-strip-types scripts/bake-secret.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "dist:win": "npm run build && electron-builder --win nsis portable -c electron-builder.yml"
+  },
+  "dependencies": {
+    "uiohook-napi": "^1.5.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "electron": "^45.2.1",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}

@@ -1,0 +1,14 @@
+node_modules/
+out/
+release/
+dist/
+.env
+.env.*
+!.env.example
+src/main/generated/sealed-secret.json
+resources/whisper/*
+!resources/whisper/.gitkeep
+*.log
+.DS_Store
+*.wav
+tmp/

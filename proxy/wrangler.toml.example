@@ -1,0 +1,15 @@
+name = "chat-mode-relay"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+UPSTREAM_URL = "https://apihub.agnes-ai.com/v1/chat/completions"
+RATE_LIMIT = "30"
+# Optional. When set, the app must send this as the relay token.
+# PROXY_TOKEN = ""
+# Optional. When set, the relay overwrites the model on each request.
+# MODEL = ""
+
+# Secrets, set outside the file:
+#   npx wrangler secret put AGNES_API_KEY
+#   npx wrangler secret put PROXY_TOKEN

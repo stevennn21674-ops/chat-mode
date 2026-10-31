@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chat Mode</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="mark" aria-hidden="true"></div>
+        <div>
+          <h1>Chat Mode</h1>
+          <p>Viewer chat that floats over your screen and reacts to what you are doing.</p>
+        </div>
+      </header>
+
+      <section class="card">
+        <label class="switch"><input id="enabled" type="checkbox" /> Show chat</label>
+        <label class="switch"><input id="screen" type="checkbox" /> React to the screen</label>
+        <label class="switch"><input id="voice" type="checkbox" /> Voice reactions</label>
+        <label class="switch"><input id="startup" type="checkbox" /> Launch at startup</label>
+      </section>
+
+      <section class="card">
+        <label>
+          Microphone
+          <select id="mic"></select>
+        </label>
+        <p class="hint">Uses the Windows default until you pick another device. Speech stays on this PC.</p>
+        <p id="speech" class="hint"></p>
+        <p id="hook" class="hint"></p>
+      </section>
+
+      <section class="card">
+        <h2>Comment service</h2>
+        <label class="switch"><input id="eco" type="checkbox" /> Eco mode</label>
+        <p class="hint">On by default. Screen reads wait longer, unchanged pictures are skipped, and reads slow further when you are idle or on battery.</p>
+        <label>Screen interval <output id="interval-out"></output>
+          <input id="interval" type="range" min="15" max="120" step="5" />
+        </label>
+        <label>Calls per hour <output id="cap-out"></output>
+          <input id="cap" type="range" min="4" max="120" step="1" />
+        </label>
+        <p id="usage" class="hint"></p>
+        <label>Base URL
+          <input id="base" type="url" autocomplete="off" spellcheck="false" />
+        </label>
+        <label>Model
+          <input id="model-name" type="text" autocomplete="off" spellcheck="false" />
+        </label>
+        <label>API key
+          <span class="key-row">
+            <input id="key" type="password" autocomplete="off" spellcheck="false" />
+            <button id="reveal" type="button">Show</button>
+          </span>
+        </label>
+        <div class="actions">
+          <button id="test" type="button">Test connection</button>
+        </div>
+        <p id="test-result" class="hint"></p>
+        <p id="key-hint" class="hint"></p>
+      </section>
+
+      <section class="card">
+        <label>Chat speed <output id="speed-out"></output>
+          <input id="speed" type="range" min="1" max="7" step="1" />
+        </label>
+        <label>Opacity <output id="opacity-out"></output>
+          <input id="opacity" type="range" min="45" max="100" step="1" />
+        </label>
+        <label>Font size <output id="font-out"></output>
+          <input id="font" type="range" min="12" max="22" step="1" />
+        </label>
+      </section>
+
+      <section class="card">
+        <div class="actions">
+          <button id="pause" type="button">Pause screen capture</button>
+          <button id="reset" type="button">Reset position</button>
+        </div>
+        <p id="status" class="status"></p>
+        <p class="hint">Pause from anywhere with Ctrl+Shift+F8. Hold V to talk.</p>
+      </section>
+
+      <details class="card">
+        <summary>Relay</summary>
+        <label>Relay URL
+          <input id="proxy" type="url" placeholder="https://your-relay.example" autocomplete="off" spellcheck="false" />
+        </label>
+        <label>Relay token
+          <input id="token" type="password" autocomplete="off" spellcheck="false" />
+        </label>
+        <p id="relay" class="hint">Leave this blank to use the built-in connection. A relay sends comments through a server you control.</p>
+      </details>
+
+      <section class="card">
+        <h2>Controls</h2>
+        <ul>
+          <li><span>Left click</span> slower chat</li>
+          <li><span>Right click</span> faster chat</li>
+          <li><span>Right-drag</span> move the chat</li>
+          <li><span>Corner drag</span> resize</li>
+          <li><span>Hold V</span> talk</li>
+          <li><span>Ctrl+Shift+F8</span> pause capture</li>
+        </ul>
+      </section>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
