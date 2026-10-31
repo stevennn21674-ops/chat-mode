@@ -44,7 +44,9 @@ jobs:
         run: npm test
 
       - name: Build installer and portable app
-        run: npm run dist:win
+        # Tag pushes make electron-builder 26 publish unless --publish is set.
+        # This workflow uploads the artifacts and attaches them to the Release.
+        run: npm run dist:win -- --publish never
 
       - name: Zip the portable app
         shell: pwsh

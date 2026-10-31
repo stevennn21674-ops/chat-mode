@@ -18,7 +18,7 @@
     "pretypecheck": "node --experimental-strip-types scripts/bake-secret.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "dist:win": "npm run build && electron-builder --win nsis portable -c electron-builder.yml"
+    "dist:win": "npm run build && electron-builder --win nsis portable --publish never -c electron-builder.yml"
   },
   "dependencies": {
     "uiohook-napi": "^1.5.5"
