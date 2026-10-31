@@ -44,9 +44,9 @@ jobs:
         run: npm test
 
       - name: Build installer and portable app
-        # Tag pushes make electron-builder 26 publish unless --publish is set.
-        # This workflow uploads the artifacts and attaches them to the Release.
-        run: npm run dist:win -- --publish never
+        # dist:win passes --publish never once. A repeated flag is parsed as an
+        # array, which electron-builder 26 does not treat as never.
+        run: npm run dist:win
 
       - name: Zip the portable app
         shell: pwsh
