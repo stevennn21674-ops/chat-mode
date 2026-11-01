@@ -16,7 +16,6 @@ declare global {
 
 const panel = document.querySelector('#panel') as HTMLElement
 const log = document.querySelector('#log') as HTMLElement
-const analyzing = document.querySelector('#analyzing') as HTMLElement
 const paused = document.querySelector('#paused') as HTMLElement
 const speed = document.querySelector('#speed') as HTMLElement
 const mic = document.querySelector('#mic') as HTMLElement
@@ -146,7 +145,6 @@ function meter(level: number): string {
 function applyState(state: OverlayState): void {
   document.documentElement.style.setProperty('--font-size', `${state.fontSize}px`)
   document.documentElement.style.setProperty('--panel-opacity', String(state.opacity))
-  analyzing.classList.toggle('hidden', !state.analyzing)
   paused.classList.toggle('hidden', !state.capturePaused)
   mic.classList.toggle('hidden', !state.micLive && !state.micNote)
   micLabel.textContent = state.micNote || 'Mic live'

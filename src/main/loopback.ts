@@ -1,0 +1,68 @@
+import { randomUUID } from 'node:crypto'
+import { unlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { ipcMain, type BrowserWindow } from 'electron'
+import { downsample, encodeWavPcm16, isSilentPcm } from '../shared/audio'
+import { whisperLocation } from './paths'
+import { asFloat32 } from './talk'
+import { transcribeFile } from './transcribe'
+
+export class LoopbackController {
+  private enabled = false
+
+  constructor(
+    private voice: BrowserWindow,
+    private log: (message: string) => void
+  ) {}
+
+  setEnabled(on: boolean): void {
+    this.enabled = on
+    if (this.voice.isDestroyed()) return
+    this.voice.webContents.send('voice:command', { type: on ? 'loopback-start' : 'loopback-stop' })
+  }
+
+  async transcript(): Promise<string> {
+    if (!this.enabled || this.voice.isDestroyed()) return ''
+    const clip = await this.take()
+    if (!clip) return ''
+    const samples = downsample(clip.pcm, clip.sampleRate, 16000)
+    if (samples.length < 8000 || isSilentPcm(samples)) return ''
+    const where = whisperLocation()
+    if (!where) return ''
+    const wavPath = join(tmpdir(), `chatmode-pc-${randomUUID()}.wav`)
+    try {
+      writeFileSync(wavPath, encodeWavPcm16(samples, 16000))
+      return await transcribeFile(where.bin, where.model, wavPath)
+    } catch {
+      this.log('computer audio transcription failed')
+      return ''
+    } finally {
+      try {
+        unlinkSync(wavPath)
+      } catch {
+        // The clip is already gone.
+      }
+    }
+  }
+
+  private take(): Promise<{ sampleRate: number; pcm: Float32Array } | null> {
+    if (this.voice.isDestroyed()) return Promise.resolve(null)
+    return new Promise((resolve) => {
+      const onClip = (_event: unknown, payload: unknown): void => {
+        clearTimeout(timer)
+        const record = payload && typeof payload === 'object' ? (payload as { sampleRate?: unknown; pcm?: unknown }) : {}
+        const pcm = asFloat32(record.pcm)
+        const sampleRate = typeof record.sampleRate === 'number' ? record.sampleRate : 0
+        if (!pcm || sampleRate <= 0 || pcm.length === 0) resolve(null)
+        else resolve({ sampleRate, pcm })
+      }
+      const timer = setTimeout(() => {
+        ipcMain.removeListener('voice:loopback', onClip)
+        resolve(null)
+      }, 2000)
+      ipcMain.once('voice:loopback', onClip)
+      this.voice.webContents.send('voice:command', { type: 'loopback-take' })
+    })
+  }
+}

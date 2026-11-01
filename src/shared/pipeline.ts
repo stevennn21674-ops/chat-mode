@@ -21,6 +21,7 @@ export interface ProduceInput {
   model: string
   imageBase64: string | null
   transcripts: string[]
+  pcAudio?: string[]
   recentLines: string[]
   avoidUsernames: string[]
   speedLevel: number
@@ -97,6 +98,7 @@ export async function produceReactions(input: ProduceInput, deps: ProduceDeps): 
     system: buildSystemPrompt(),
     userText: buildUserText({
       transcripts: input.transcripts,
+      pcAudio: input.pcAudio,
       recentLines: input.recentLines,
       avoidUsernames: input.avoidUsernames,
       batchCount: input.batchCount,

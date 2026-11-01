@@ -18,6 +18,7 @@ interface ControllerDeps {
   sendMessage: (message: ChatMessage) => void
   config: () => ServiceConfig
   capture: () => Promise<{ jpegBase64: string; hash: string } | null>
+  pcAudio: () => Promise<string>
   usage: () => CallUsage
   setUsage: (usage: CallUsage) => void
   power: () => { idle: boolean; onBattery: boolean }
@@ -30,8 +31,8 @@ export class ChatController {
   private recentLines: string[] = []
   private avoid: string[] = []
   private backoffMs = 0
-  private nextCycleAt = 0
   private voicePending = false
+  private capturePending = false
   private busy = false
   private alive = true
   private pump: NodeJS.Timeout | null = null
@@ -103,6 +104,13 @@ export class ChatController {
     this.voicePending = true
   }
 
+  requestScreen(): boolean {
+    const settings = this.deps.getSettings()
+    if (!this.alive || !settings.enabled || !settings.screenReaction || settings.capturePaused) return false
+    this.capturePending = true
+    return true
+  }
+
   changeSpeed(direction: 'slower' | 'faster'): void {
     const next = stepSpeed(this.deps.getSettings().speedLevel, direction)
     this.deps.updateSettings({ speedLevel: next })
@@ -116,9 +124,11 @@ export class ChatController {
 
   setCapturePaused(paused: boolean): void {
     if (paused === this.deps.getSettings().capturePaused) return
-    if (paused) this.abort?.abort()
+    if (paused) {
+      this.abort?.abort()
+      this.capturePending = false
+    }
     this.deps.updateSettings({ capturePaused: paused })
-    if (!paused) this.nextCycleAt = 0
     this.publish()
   }
 
@@ -159,6 +169,11 @@ export class ChatController {
     const settings = this.deps.getSettings()
     if (!settings.enabled) return
     if (this.pending.length < 2) this.idleFill(2)
+    const wantVoice = this.voicePending
+    const wantCapture = this.capturePending && settings.screenReaction && !settings.capturePaused
+    if (!wantVoice && !wantCapture) return
+    this.voicePending = false
+    this.capturePending = false
     const power = this.deps.power()
     const waitMs = nextWaitMs({
       captureIntervalSec: settings.captureIntervalSec,
@@ -167,36 +182,30 @@ export class ChatController {
       onBattery: power.onBattery,
       backoffMs: this.backoffMs
     })
-    const screenDue = Date.now() >= this.nextCycleAt && settings.screenReaction && !settings.capturePaused
-    if (!this.voicePending && !screenDue) return
-    const reason = this.voicePending ? 'voice' : 'interval'
-    this.voicePending = false
-    await this.runCycle(reason, waitMs)
-    this.nextCycleAt = Date.now() + waitMs
+    await this.runCycle(wantVoice ? 'voice' : 'interval', waitMs, wantCapture)
   }
 
-  private async runCycle(reason: 'interval' | 'voice', waitMs: number): Promise<void> {
+  private async runCycle(reason: 'interval' | 'voice', waitMs: number, captureNow = false): Promise<void> {
     this.busy = true
     const settings = this.deps.getSettings()
     const config = this.deps.config()
     const demo = process.env.CHATMODE_DEMO === '1'
     const canSend = demo || canReachService(settings, config)
-    const captureScreen = settings.screenReaction && !settings.capturePaused && (reason === 'interval' || canSend)
+    const captureScreen = captureNow && settings.screenReaction && !settings.capturePaused
     const controller = new AbortController()
     this.abort = controller
     try {
       let image: string | null = null
-      let changed = true
+      let changed = !captureScreen
       if (captureScreen) {
         const frame = await this.deps.capture()
         if (controller.signal.aborted || !this.alive) return
         if (frame) {
           changed = !frameUnchanged(this.lastHash, frame.hash, settings.ecoMode ? 8 : 4)
           this.lastHash = frame.hash || this.lastHash
-          if (changed || reason === 'voice') image = frame.jpegBase64
+          if (changed) image = frame.jpegBase64
         }
       }
-      if (reason === 'voice' && settings.ecoMode && !changed) image = null
       const decision = shouldCallModel({
         reason,
         screenChanged: changed,
@@ -206,6 +215,12 @@ export class ChatController {
       if (decision !== 'ok') {
         this.idleFill(reason === 'voice' ? 2 : 3)
         return
+      }
+      let pcAudio: string[] = []
+      if (settings.hearComputerAudio) {
+        const heard = usableTranscript(await this.deps.pcAudio())
+        if (controller.signal.aborted || !this.alive) return
+        if (heard) pcAudio = [heard]
       }
       this.analyzing = reason === 'interval' || Boolean(image)
       this.publish()
@@ -223,6 +238,7 @@ export class ChatController {
           model: config.model,
           imageBase64: image,
           transcripts: [...this.transcripts],
+          pcAudio,
           recentLines: [...this.recentLines],
           avoidUsernames: [...this.avoid],
           speedLevel: settings.speedLevel,

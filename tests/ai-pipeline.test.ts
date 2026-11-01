@@ -127,7 +127,8 @@ describe('reaction pipeline', () => {
         complete: async (params) => {
           sawImage = params.imageBase64
           expect(params.userText).toContain('what was that')
-          expect(params.userText).toContain('No screenshot')
+          expect(params.userText).toContain('Do not invent what is on the screen')
+          expect(params.userText.toLowerCase()).not.toContain('screenshot')
           return { ok: true, content: modelJson }
         }
       }
@@ -135,6 +136,22 @@ describe('reaction pipeline', () => {
     expect(sawImage).toBeNull()
     expect(output.source).toBe('model')
     expect(output.analyzed).toBe(false)
+  })
+
+  it('adds computer audio to the same request', async () => {
+    let calls = 0
+    let text = ''
+    await produceReactions(input({ pcAudio: ['the boss yelled'] }), {
+      rng: () => 0.5,
+      complete: async (params) => {
+        calls += 1
+        text = params.userText
+        return { ok: true, content: modelJson }
+      }
+    })
+    expect(calls).toBe(1)
+    expect(text).toContain('Audio on the PC')
+    expect(text).toContain('the boss yelled')
   })
 })
 

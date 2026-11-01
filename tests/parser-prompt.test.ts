@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseModelOutput } from '../src/shared/parser'
-import { buildSystemPrompt, SLANG_TERMS } from '../src/shared/prompt'
+import { buildSystemPrompt, buildUserText, SLANG_TERMS } from '../src/shared/prompt'
 import { mulberry32 } from './rng'
 
 const ctx = () => ({ now: 10, rng: mulberry32(3), avoid: new Set<string>(['taken']) })
@@ -52,5 +52,30 @@ describe('system prompt', () => {
     expect(prompt).toContain('quiet lurker')
     for (const term of SLANG_TERMS) expect(prompt).toContain(term)
     expect(prompt.toLowerCase()).not.toContain('agnes')
+    expect(prompt).toContain('as if they are looking at it live')
+    expect(prompt).toContain('never mention screenshots, screen captures, AI')
+  })
+
+  it('talks about the screen and computer audio without calling them a screenshot', () => {
+    const seen = buildUserText({
+      transcripts: [],
+      recentLines: [],
+      avoidUsernames: [],
+      batchCount: 4,
+      hasImage: true,
+      pcAudio: ['the boss yelled']
+    })
+    expect(seen).toContain('Audio on the PC')
+    expect(seen).toContain('the boss yelled')
+    expect(seen.toLowerCase()).not.toContain('screenshot')
+    const unseen = buildUserText({
+      transcripts: ['hello'],
+      recentLines: [],
+      avoidUsernames: [],
+      batchCount: 2,
+      hasImage: false
+    })
+    expect(unseen).toContain('Do not invent what is on the screen')
+    expect(unseen.toLowerCase()).not.toContain('screenshot')
   })
 })

@@ -20,6 +20,7 @@
         <label class="switch"><input id="enabled" type="checkbox" /> Show chat</label>
         <label class="switch"><input id="screen" type="checkbox" /> React to the screen</label>
         <label class="switch"><input id="voice" type="checkbox" /> Voice reactions</label>
+        <label class="switch"><input id="pc-audio" type="checkbox" /> Hear computer audio</label>
         <label class="switch"><input id="startup" type="checkbox" /> Launch at startup</label>
       </section>
 
@@ -29,6 +30,7 @@
           <select id="mic"></select>
         </label>
         <p class="hint">Uses the Windows default until you pick another device. Speech stays on this PC.</p>
+        <p class="hint">Hear computer audio is on by default. The last 18 seconds of sound from this PC are transcribed here and added when you press ` or finish talking. Silence is skipped, and it does not make its own request.</p>
         <p id="speech" class="hint"></p>
         <p id="hook" class="hint"></p>
       </section>
@@ -36,10 +38,7 @@
       <section class="card">
         <h2>Comment service</h2>
         <label class="switch"><input id="eco" type="checkbox" /> Eco mode</label>
-        <p class="hint">On by default. Screen reads wait longer, unchanged pictures are skipped, and reads slow further when you are idle or on battery.</p>
-        <label>Screen interval <output id="interval-out"></output>
-          <input id="interval" type="range" min="15" max="120" step="5" />
-        </label>
+        <p class="hint">On by default. The screen is sent only when you press `. Unchanged screens are skipped, and calls stay under the hourly cap.</p>
         <label>Calls per hour <output id="cap-out"></output>
           <input id="cap" type="range" min="4" max="120" step="1" />
         </label>
@@ -81,7 +80,7 @@
           <button id="reset" type="button">Reset position</button>
         </div>
         <p id="status" class="status"></p>
-        <p class="hint">Pause from anywhere with Ctrl+Shift+F8. Hold V to talk.</p>
+        <p class="hint">Press ` to send the screen. Pause from anywhere with Ctrl+Shift+F8. Hold V to talk.</p>
       </section>
 
       <details class="card">
@@ -102,6 +101,7 @@
           <li><span>Right click</span> faster chat</li>
           <li><span>Right-drag</span> move the chat</li>
           <li><span>Corner drag</span> resize</li>
+          <li><span>`</span> send the screen</li>
           <li><span>Hold V</span> talk</li>
           <li><span>Ctrl+Shift+F8</span> pause capture</li>
         </ul>

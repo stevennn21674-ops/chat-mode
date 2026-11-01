@@ -26,17 +26,20 @@ describe('settings persistence', () => {
     expect(next.enabled).toBe(false)
     expect(next.x).toBe(12)
     expect(next.ecoMode).toBe(true)
+    expect(next.hearComputerAudio).toBe(true)
     expect(next.captureIntervalSec).toBe(25)
     expect(next.maxCallsPerHour).toBe(20)
     const bounded = applyPatch(DEFAULT_SETTINGS, {
       captureIntervalSec: 5,
       maxCallsPerHour: 999,
       ecoMode: false,
+      hearComputerAudio: false,
       apiKey: 'super-secret-value'
     })
     expect(bounded.captureIntervalSec).toBe(15)
     expect(bounded.maxCallsPerHour).toBe(120)
     expect(bounded.ecoMode).toBe(false)
+    expect(bounded.hearComputerAudio).toBe(false)
     expect(JSON.stringify(bounded)).not.toContain('super-secret-value')
     expect(usableProxyUrl('ftp://nope')).toBe('')
     expect(usableProxyUrl('https://relay.example/v1/')).toBe('https://relay.example/v1')

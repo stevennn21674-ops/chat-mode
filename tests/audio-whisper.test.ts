@@ -1,11 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { downsample, encodeWavPcm16 } from '../src/shared/audio'
+import { downsample, encodeWavPcm16, isSilentPcm, PcmWindow } from '../src/shared/audio'
 import { parseWhisperStdout } from '../src/shared/whisper'
 
 describe('audio', () => {
   it('downsamples by averaging buckets', () => {
     const input = Float32Array.from([0, 1, 0.5, 0.5])
     expect(Array.from(downsample(input, 2000, 1000))).toEqual([0.5, 0.5])
+  })
+
+  it('keeps the last 18 seconds and treats silence as skippable', () => {
+    const window = new PcmWindow(18)
+    window.push(Float32Array.from({ length: 16000 }, () => 0), 16000)
+    window.push(Float32Array.from({ length: 16000 * 20 }, () => 0.2), 16000)
+    const snap = window.snapshot()
+    expect(snap?.sampleRate).toBe(16000)
+    expect(snap?.samples.length).toBe(16000 * 18)
+    expect(isSilentPcm(Float32Array.from({ length: 1600 }, () => 0))).toBe(true)
+    expect(isSilentPcm(Float32Array.from({ length: 1600 }, () => 0.2))).toBe(false)
   })
 
   it('writes a 16-bit wav header', () => {

@@ -19,6 +19,7 @@ declare global {
 const enabled = document.querySelector('#enabled') as HTMLInputElement
 const screen = document.querySelector('#screen') as HTMLInputElement
 const voice = document.querySelector('#voice') as HTMLInputElement
+const pcAudio = document.querySelector('#pc-audio') as HTMLInputElement
 const startup = document.querySelector('#startup') as HTMLInputElement
 const mic = document.querySelector('#mic') as HTMLSelectElement
 const speed = document.querySelector('#speed') as HTMLInputElement
@@ -33,9 +34,7 @@ const status = document.querySelector('#status') as HTMLElement
 const speech = document.querySelector('#speech') as HTMLElement
 const hook = document.querySelector('#hook') as HTMLElement
 const eco = document.querySelector('#eco') as HTMLInputElement
-const interval = document.querySelector('#interval') as HTMLInputElement
 const cap = document.querySelector('#cap') as HTMLInputElement
-const intervalOut = document.querySelector('#interval-out') as HTMLOutputElement
 const capOut = document.querySelector('#cap-out') as HTMLOutputElement
 const usage = document.querySelector('#usage') as HTMLElement
 const base = document.querySelector('#base') as HTMLInputElement
@@ -58,6 +57,7 @@ function render(view: SettingsView): void {
   enabled.checked = view.enabled
   screen.checked = view.screenReaction
   voice.checked = view.voiceEnabled
+  pcAudio.checked = view.hearComputerAudio
   startup.checked = view.launchAtStartup
   idleValue(speed, String(view.speedLevel))
   idleValue(opacity, String(Math.round(view.opacity * 100)))
@@ -65,16 +65,12 @@ function render(view: SettingsView): void {
   idleValue(proxy, view.proxyUrl)
   idleValue(token, view.proxyToken)
   eco.checked = view.ecoMode
-  idleValue(interval, String(view.captureIntervalSec))
   idleValue(cap, String(view.maxCallsPerHour))
   idleValue(base, view.baseUrl)
   idleValue(modelName, view.model)
   if (view.includeKey) idleValue(keyInput, view.apiKey)
-  intervalOut.textContent = `${view.captureIntervalSec}s`
   capOut.textContent = String(view.maxCallsPerHour)
-  const pace = view.idle ? ' Idle slowdown is on.' : ''
-  const battery = view.onBattery ? ' Battery slowdown is on.' : ''
-  usage.textContent = `Calls this hour: ${view.callsThisHour} / ${view.maxCallsPerHour}.${pace}${battery}`
+  usage.textContent = `Calls this hour: ${view.callsThisHour} / ${view.maxCallsPerHour}.`
   speedOut.textContent = `${view.speedLevel} / 7`
   opacityOut.textContent = `${Math.round(view.opacity * 100)}%`
   fontOut.textContent = `${view.fontSize}px`
@@ -82,8 +78,8 @@ function render(view: SettingsView): void {
   if (view.capturePaused) status.textContent = 'Screen capture is paused.'
   else if (!view.screenReaction) status.textContent = 'Screen reactions are off.'
   else if (view.analyzing) status.textContent = 'Screen is being analyzed.'
-  else if (!view.serviceReady) status.textContent = 'Screen reactions are unavailable.'
-  else status.textContent = 'Screen reactions are on.'
+  else if (!view.serviceReady) status.textContent = 'Press ` when a key is saved. Until then the chat stays local.'
+  else status.textContent = 'Press ` to send the screen.'
   speech.textContent = view.voiceModelReady
     ? 'On-device speech model: ready.'
     : 'On-device speech model: not installed. The mic still opens, but words will not be transcribed.'
@@ -122,6 +118,7 @@ async function loadMics(selected: string): Promise<void> {
 enabled.addEventListener('change', () => void window.settings.update({ enabled: enabled.checked }))
 screen.addEventListener('change', () => void window.settings.update({ screenReaction: screen.checked }))
 voice.addEventListener('change', () => void window.settings.update({ voiceEnabled: voice.checked }))
+pcAudio.addEventListener('change', () => void window.settings.update({ hearComputerAudio: pcAudio.checked }))
 startup.addEventListener('change', () => void window.settings.update({ launchAtStartup: startup.checked }))
 mic.addEventListener('change', () => void window.settings.update({ micDeviceId: mic.value }))
 speed.addEventListener('input', () => {
@@ -142,10 +139,6 @@ pause.addEventListener('click', () => {
 reset.addEventListener('click', () => void window.settings.resetPosition())
 
 eco.addEventListener('change', () => void window.settings.update({ ecoMode: eco.checked }))
-interval.addEventListener('input', () => {
-  intervalOut.textContent = `${interval.value}s`
-  void window.settings.update({ captureIntervalSec: Number(interval.value) })
-})
 cap.addEventListener('input', () => {
   capOut.textContent = cap.value
   void window.settings.update({ maxCallsPerHour: Number(cap.value) })

@@ -5,6 +5,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enabled: true,
   screenReaction: true,
   voiceEnabled: true,
+  hearComputerAudio: true,
   micDeviceId: '',
   speedLevel: 4,
   opacity: 0.92,
@@ -60,6 +61,7 @@ export function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   if (typeof raw.enabled === 'boolean') next.enabled = raw.enabled
   if (typeof raw.screenReaction === 'boolean') next.screenReaction = raw.screenReaction
   if (typeof raw.voiceEnabled === 'boolean') next.voiceEnabled = raw.voiceEnabled
+  if (typeof raw.hearComputerAudio === 'boolean') next.hearComputerAudio = raw.hearComputerAudio
   if (typeof raw.launchAtStartup === 'boolean') next.launchAtStartup = raw.launchAtStartup
   if (typeof raw.capturePaused === 'boolean') next.capturePaused = raw.capturePaused
 

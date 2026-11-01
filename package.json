@@ -1,6 +1,6 @@
 {
   "name": "chat-mode",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "Always-on-top viewer chat that reacts to your screen and what you say.",
   "main": "./out/main/index.js",
   "type": "module",

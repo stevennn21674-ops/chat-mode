@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, globalShortcut, ipcMain, powerMonitor, session, screen } from 'electron'
+import { app, BrowserWindow, Menu, desktopCapturer, globalShortcut, ipcMain, powerMonitor, session, screen } from 'electron'
 import type { Input } from 'electron'
 import { existsSync } from 'node:fs'
 import { callsInWindow } from '../shared/budget'
@@ -11,6 +11,7 @@ import { capturePrimaryJpeg, DEMO_JPEG } from './capture'
 import { testService } from './connection-test'
 import { CredentialStore } from './credential-store'
 import { log } from './logger'
+import { LoopbackController } from './loopback'
 import { loadPage, OverlayController, placeOverlay, preloadPath } from './overlay'
 import { defaultPlacement, initialSize } from '../shared/placement'
 import { credentialsFile, resourceDir, settingsFile, usageFile, whisperLocation } from './paths'
@@ -88,9 +89,24 @@ async function bootstrap(): Promise<void> {
   app.setAppUserModelId('com.chatmode.desktop')
   Menu.setApplicationMenu(null)
   session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => {
-    callback(permission === 'media')
+    callback(permission === 'media' || permission === 'display-capture')
   })
-  session.defaultSession.setPermissionCheckHandler((_contents, permission) => permission === 'media')
+  session.defaultSession.setPermissionCheckHandler((_contents, permission) => {
+    return permission === 'media' || permission === 'display-capture'
+  })
+  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    desktopCapturer
+      .getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 }, fetchWindowIcons: false })
+      .then((sources) => {
+        const source = sources[0]
+        if (!source) {
+          callback(null)
+          return
+        }
+        callback({ video: { id: source.id, name: source.name }, audio: 'loopback' })
+      })
+      .catch(() => callback(null))
+  }, { useSystemPicker: false })
 
   const store = new SettingsStore(settingsFile(), readSettingsFile(settingsFile()))
   const credentials = new CredentialStore(credentialsFile())
@@ -122,6 +138,10 @@ async function bootstrap(): Promise<void> {
     }
   })
   guard(voice)
+  const loopback = new LoopbackController(voice, log)
+  voice.webContents.on('did-finish-load', () => {
+    loopback.setEnabled(store.settings.hearComputerAudio)
+  })
   loadPage(voice, 'voice')
 
   let chatRef: OverlayController | null = null
@@ -152,6 +172,7 @@ async function bootstrap(): Promise<void> {
         return null
       }
     },
+    pcAudio: () => loopback.transcript(),
     usage: () => usage.usage,
     setUsage: (next) => usage.replace(next),
     power: powerState,
@@ -198,11 +219,20 @@ async function bootstrap(): Promise<void> {
     status: () => statusText()
   })
 
+  let captureHintUntil = 0
+
   function publish(state: OverlayState): void {
     if (!overlay.win.isDestroyed()) overlay.win.webContents.send('overlay:state', state)
     if (settingsWindow && !settingsWindow.isDestroyed()) {
       settingsWindow.webContents.send('settings:changed', view())
     }
+    tray.tray.setToolTip(statusText())
+  }
+
+  function flashCapture(): void {
+    captureHintUntil = Date.now() + 1400
+    tray.tray.setToolTip(statusText())
+    tray.flash()
   }
 
   function refresh(): void {
@@ -240,6 +270,7 @@ async function bootstrap(): Promise<void> {
   function statusText(): string {
     if (!store.settings.enabled) return 'Chat Mode is hidden'
     if (store.settings.capturePaused) return 'Chat Mode — capture paused'
+    if (Date.now() < captureHintUntil) return 'Chat Mode — reading the screen'
     if (controller.snapshot().analyzing) return 'Chat Mode — screen is being analyzed'
     return 'Chat Mode'
   }
@@ -329,11 +360,13 @@ async function bootstrap(): Promise<void> {
   })
   ipcMain.handle('settings:update', (_event, patch: unknown) => {
     const before = store.settings.launchAtStartup
+    const heard = store.settings.hearComputerAudio
     if (patch && typeof patch === 'object' && typeof (patch as { capturePaused?: unknown }).capturePaused === 'boolean') {
       controller.setCapturePaused((patch as { capturePaused: boolean }).capturePaused)
     }
     store.update(patch)
     if (store.settings.launchAtStartup !== before) applyLogin(store.settings.launchAtStartup)
+    if (store.settings.hearComputerAudio !== heard) loopback.setEnabled(store.settings.hearComputerAudio)
     refresh()
     return view(false)
   })
@@ -352,6 +385,12 @@ async function bootstrap(): Promise<void> {
   ipcMain.on('voice:error', (_event, code: unknown) => {
     controller.setMicNote(code === 'denied' ? 'Microphone is blocked' : 'Microphone failed')
   })
+  let pcAudioNoted = false
+  ipcMain.on('voice:pc-audio', () => {
+    if (pcAudioNoted) return
+    pcAudioNoted = true
+    log('computer audio is unavailable')
+  })
 
   overlay.win.on('close', (event) => {
     if (!quitting) {
@@ -360,8 +399,12 @@ async function bootstrap(): Promise<void> {
     }
   })
 
-  bindLocalTalk(overlay.win, talk)
-  bindLocalTalk(voice, talk)
+  const onCaptureKey = (): void => {
+    if (!controller.requestScreen()) return
+    flashCapture()
+  }
+  bindLocalTalk(overlay.win, talk, onCaptureKey)
+  bindLocalTalk(voice, talk, onCaptureKey)
 
   const registered = globalShortcut.register('CommandOrControl+Shift+F8', () => {
     controller.toggleCapture()
@@ -369,7 +412,7 @@ async function bootstrap(): Promise<void> {
   })
   if (!registered) log('pause hotkey is unavailable')
 
-  hookReady = await startHook(talk, () => overlay.endGesture())
+  hookReady = await startHook(talk, () => overlay.endGesture(), onCaptureKey)
   controller.start(publish)
   refresh()
   if (process.env.CHATMODE_SETTINGS === '1') openSettings()
@@ -382,6 +425,7 @@ async function bootstrap(): Promise<void> {
 
   app.on('before-quit', () => {
     quitting = true
+    loopback.setEnabled(false)
     controller.stop()
     store.flush()
     globalShortcut.unregisterAll()
@@ -433,9 +477,19 @@ function listMics(voice: BrowserWindow): Promise<MicDevice[]> {
   })
 }
 
-function bindLocalTalk(win: BrowserWindow, talk: TalkController): void {
+function bindLocalTalk(win: BrowserWindow, talk: TalkController, onCapture: () => void): void {
+  let graveHeld = false
   win.webContents.on('before-input-event', (event, input) => {
     if (hookReady) return
+    if (isPlainGrave(input)) {
+      event.preventDefault()
+      if (input.type === 'keyDown' && !input.isAutoRepeat && !graveHeld) {
+        graveHeld = true
+        onCapture()
+      }
+      if (input.type === 'keyUp') graveHeld = false
+      return
+    }
     if (!isPlainV(input)) return
     event.preventDefault()
     if (input.type === 'keyDown' && !input.isAutoRepeat) talk.keyDown()
@@ -447,16 +501,30 @@ function isPlainV(input: Input): boolean {
   return input.key.toLowerCase() === 'v' && !input.control && !input.alt && !input.meta
 }
 
-async function startHook(talk: TalkController, endGesture: () => void): Promise<boolean> {
+function isPlainGrave(input: Input): boolean {
+  return input.code === 'Backquote' && !input.control && !input.alt && !input.meta && !input.shift
+}
+
+async function startHook(talk: TalkController, endGesture: () => void, onCapture: () => void): Promise<boolean> {
   try {
     const { uIOhook, UiohookKey } = await import('uiohook-napi')
+    let graveHeld = false
     uIOhook.on('keydown', (event) => {
       noteActivity()
+      const plain = !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
+      if (event.keycode === UiohookKey.Backquote && plain) {
+        if (!graveHeld) {
+          graveHeld = true
+          onCapture()
+        }
+        return
+      }
       if (event.keycode !== UiohookKey.V || event.ctrlKey || event.altKey || event.metaKey) return
       talk.keyDown()
     })
     uIOhook.on('mousemove', () => noteActivity())
     uIOhook.on('keyup', (event) => {
+      if (event.keycode === UiohookKey.Backquote) graveHeld = false
       if (event.keycode === UiohookKey.V) talk.keyUp()
     })
     uIOhook.on('mouseup', () => endGesture())

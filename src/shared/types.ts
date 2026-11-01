@@ -18,6 +18,7 @@ export interface AppSettings {
   enabled: boolean
   screenReaction: boolean
   voiceEnabled: boolean
+  hearComputerAudio: boolean
   micDeviceId: string
   speedLevel: number
   opacity: number
@@ -99,3 +100,4 @@ export const LIMITS = {
 
 export const PAUSE_HOTKEY = 'Ctrl+Shift+F8'
 export const TALK_KEY = 'V'
+export const CAPTURE_KEY = '`'
