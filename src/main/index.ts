@@ -202,6 +202,8 @@ async function bootstrap(): Promise<void> {
     log
   })
 
+  // The tray renders (and reads status) before createTray returns.
+  let captureHintUntil = 0
   const tray = createTray({
     getSettings: () => store.settings,
     setEnabled: (value) => applyEnabled(value),
@@ -218,8 +220,6 @@ async function bootstrap(): Promise<void> {
     resetPosition: () => resetPosition(),
     status: () => statusText()
   })
-
-  let captureHintUntil = 0
 
   function publish(state: OverlayState): void {
     if (!overlay.win.isDestroyed()) overlay.win.webContents.send('overlay:state', state)
