@@ -1,8 +1,9 @@
 import { app, BrowserWindow, Menu, desktopCapturer, globalShortcut, ipcMain, powerMonitor, session, screen } from 'electron'
 import type { Input } from 'electron'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { callsInWindow } from '../shared/budget'
-import { canReachService, usableProxyUrl } from '../shared/settings'
+import { aiModeSpecified, canReachService, defaultAiMode, usableProxyUrl } from '../shared/settings'
+import { startupStateReady } from '../shared/startup'
 import { readSettingsFile } from '../shared/settings-file'
 import { resolveService } from '../shared/service-defaults'
 import { PAUSE_HOTKEY, TALK_KEY, type ChatMessage, type MicDevice, type OverlayState, type SettingsView } from '../shared/types'
@@ -86,6 +87,10 @@ if (!gotLock) {
 let settingsWindow: BrowserWindow | null = null
 
 async function bootstrap(): Promise<void> {
+  if (!startupStateReady()) {
+    log('startup state was not ready')
+    return
+  }
   app.setAppUserModelId('com.chatmode.desktop')
   Menu.setApplicationMenu(null)
   session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => {
@@ -108,8 +113,14 @@ async function bootstrap(): Promise<void> {
       .catch(() => callback(null))
   }, { useSystemPicker: false })
 
-  const store = new SettingsStore(settingsFile(), readSettingsFile(settingsFile()))
+  const settingsPath = settingsFile()
+  const specifiedAiMode = aiModeSpecified(readRawSettings(settingsPath))
+  const store = new SettingsStore(settingsPath, readSettingsFile(settingsPath))
   const credentials = new CredentialStore(credentialsFile())
+  if (specifiedAiMode === null) {
+    const hasKey = credentials.get().length > 0 || getServiceConfig().apiKey.length > 0
+    store.settings.aiMode = defaultAiMode(hasKey, null)
+  }
   const usage = new UsageStore(usageFile())
   applyLogin(store.settings.launchAtStartup)
 
@@ -215,6 +226,10 @@ async function bootstrap(): Promise<void> {
       store.update({ voiceEnabled: value })
       refresh()
     },
+    setAiMode: (value) => {
+      store.update({ aiMode: value })
+      refresh()
+    },
     setPaused: (value) => controller.setCapturePaused(value),
     openSettings: () => openSettings(),
     resetPosition: () => resetPosition(),
@@ -303,7 +318,7 @@ async function bootstrap(): Promise<void> {
     }
     settingsWindow = new BrowserWindow({
       width: 480,
-      height: 860,
+      height: 920,
       minWidth: 400,
       minHeight: 560,
       show: false,
@@ -433,6 +448,14 @@ async function bootstrap(): Promise<void> {
   app.on('window-all-closed', () => {
     // The tray keeps the process alive.
   })
+}
+
+function readRawSettings(file: string): unknown {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as unknown
+  } catch {
+    return null
+  }
 }
 
 function applyLogin(openAtLogin: boolean): void {

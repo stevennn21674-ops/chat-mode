@@ -1,5 +1,5 @@
 export type Badge = 'mod' | 'sub' | 'vip' | null
-export type MessageKind = 'chat' | 'donation' | 'sub' | 'raid' | 'hype'
+export type MessageKind = 'chat' | 'donation' | 'sub' | 'raid' | 'hype' | 'system'
 
 export interface ChatMessage {
   id: string
@@ -12,6 +12,7 @@ export interface ChatMessage {
   viewers?: number
   hypeLevel?: number
   hypeProgress?: number
+  purgeUser?: string
 }
 
 export interface AppSettings {
@@ -36,6 +37,7 @@ export interface AppSettings {
   maxCallsPerHour: number
   model: string
   baseUrl: string
+  aiMode: boolean
 }
 
 export interface OverlayState {
@@ -47,6 +49,7 @@ export interface OverlayState {
   capturePaused: boolean
   speedFlash: number
   micNote: string | null
+  viewerCount: number
 }
 
 export interface MicDevice {

@@ -22,7 +22,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   captureIntervalSec: 25,
   maxCallsPerHour: 20,
   model: DEFAULT_MODEL,
-  baseUrl: DEFAULT_BASE_URL
+  baseUrl: DEFAULT_BASE_URL,
+  aiMode: false
 }
 
 function finiteNumber(value: unknown): number | null {
@@ -43,6 +44,21 @@ export function usableProxyUrl(value: string): string {
   } catch {
     return ''
   }
+}
+
+export function aiModeSpecified(value: unknown): boolean | null {
+  if (!value || typeof value !== 'object') return null
+  const flag = (value as Record<string, unknown>).aiMode
+  return typeof flag === 'boolean' ? flag : null
+}
+
+export function defaultAiMode(hasApiKey: boolean, specified: boolean | null): boolean {
+  if (specified !== null) return specified
+  return hasApiKey
+}
+
+export function chatUsesService(aiMode: boolean, demo = false): boolean {
+  return aiMode || demo
 }
 
 export function canReachService(
@@ -96,6 +112,7 @@ export function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   if (typeof raw.proxyToken === 'string') next.proxyToken = raw.proxyToken.replace(/[\r\n]/g, '').slice(0, 200)
 
   if (typeof raw.ecoMode === 'boolean') next.ecoMode = raw.ecoMode
+  if (typeof raw.aiMode === 'boolean') next.aiMode = raw.aiMode
   const interval = finiteNumber(raw.captureIntervalSec)
   if (interval !== null) {
     next.captureIntervalSec = clamp(Math.round(interval), LIMITS.intervalMin, LIMITS.intervalMax)

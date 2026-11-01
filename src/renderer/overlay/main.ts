@@ -1,3 +1,4 @@
+import { formatViewerCount } from '@shared/crowd'
 import type { ChatMessage, OverlayState, PointerEventPayload } from '@shared/types'
 
 interface ChatBridge {
@@ -16,6 +17,8 @@ declare global {
 
 const panel = document.querySelector('#panel') as HTMLElement
 const log = document.querySelector('#log') as HTMLElement
+const viewers = document.querySelector('#viewers') as HTMLElement
+const viewerCount = document.querySelector('#viewer-count') as HTMLElement
 const paused = document.querySelector('#paused') as HTMLElement
 const speed = document.querySelector('#speed') as HTMLElement
 const mic = document.querySelector('#mic') as HTMLElement
@@ -69,12 +72,38 @@ window.addEventListener('pointerup', (event) => {
 
 window.addEventListener('contextmenu', (event) => event.preventDefault())
 
+function swordBadge(): HTMLElement {
+  const el = document.createElement('span')
+  el.className = 'badge mod'
+  el.title = 'Moderator'
+  el.setAttribute('aria-label', 'Moderator')
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.setAttribute('viewBox', '0 0 16 16')
+  svg.setAttribute('width', '12')
+  svg.setAttribute('height', '12')
+  svg.setAttribute('aria-hidden', 'true')
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  path.setAttribute('fill', 'currentColor')
+  path.setAttribute('d', 'M12.8 1.2 14.8 3.2 13.6 4.4 11.6 2.4 12.8 1.2zM10.9 3.1 12.9 5.1 6.2 11.8 4.2 9.8 10.9 3.1zM3.4 10.6 5.4 12.6 3.2 14.2 1.8 14.8 2.4 13.4 3.4 10.6z')
+  svg.append(path)
+  el.append(svg)
+  return el
+}
+
 function badge(kind: ChatMessage['badge']): HTMLElement | null {
   if (!kind) return null
+  if (kind === 'mod') return swordBadge()
   const el = document.createElement('span')
   el.className = `badge ${kind}`
-  el.textContent = kind === 'mod' ? 'MOD' : kind === 'vip' ? 'VIP' : 'SUB'
+  el.textContent = kind === 'vip' ? 'VIP' : 'SUB'
   return el
+}
+
+function purgeUser(name: string): void {
+  const key = name.toLowerCase()
+  for (const line of [...log.querySelectorAll<HTMLElement>('.line')]) {
+    if ((line.dataset.user ?? '').toLowerCase() === key) line.remove()
+  }
 }
 
 function safeColor(color: string): string {
@@ -82,8 +111,10 @@ function safeColor(color: string): string {
 }
 
 function append(message: ChatMessage): void {
+  if (message.purgeUser) purgeUser(message.purgeUser)
   const line = document.createElement('p')
   line.className = `line ${message.kind}`
+  if (message.kind !== 'system') line.dataset.user = message.username
   if (message.kind === 'chat') {
     const mark = badge(message.badge)
     if (mark) line.append(mark)
@@ -143,6 +174,11 @@ function meter(level: number): string {
 }
 
 function applyState(state: OverlayState): void {
+  if (typeof state.viewerCount === 'number') {
+    const label = formatViewerCount(state.viewerCount)
+    viewerCount.textContent = label
+    viewers.setAttribute('aria-label', `${label} viewers`)
+  }
   document.documentElement.style.setProperty('--font-size', `${state.fontSize}px`)
   document.documentElement.style.setProperty('--panel-opacity', String(state.opacity))
   paused.classList.toggle('hidden', !state.capturePaused)

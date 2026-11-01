@@ -61,6 +61,10 @@ npx wrangler deploy
 
 Set `UPSTREAM_URL` to `https://apihub.agnes-ai.com/v1/chat/completions`. The worker's rate limit is per isolate, so treat it as a best-effort cap. Use Cloudflare's own rate-limiting rules if you need a hard limit. The same optional `PROXY_TOKEN` and `MODEL` variables apply.
 
+## AI mode off
+
+When AI mode is off, chat does not call the comment service or any other network API. Pressing backtick can still capture the screen on this PC so local chat can measure how much the picture changed, its main colors, and a window title. That image is not uploaded. **Test connection** is separate and runs only when you click it.
+
 ## What the app sends
 
-Screen reactions upload a downscaled JPEG of the primary display when you press the backtick key, plus the last few local transcripts and recent chat lines. The screen is not uploaded on a timer. Audio is transcribed on the PC and is not uploaded as audio. Text of what you said is included when voice reactions are on. If **Hear computer audio** is on, a local transcript of recent system audio can be included in that same request as text. Pause capture with Ctrl+Shift+F8 before anything you do not want in that request. The overlay window is marked so normal Windows screen capture should omit it. That exclusion is not reliable on every system; a capture taken during development on Linux still included the overlay. Pause capture before anything you do not want sent.
+When AI mode is on, screen reactions upload a downscaled JPEG of the primary display when you press the backtick key, plus the last few local transcripts and recent chat lines. The screen is not uploaded on a timer. Audio is transcribed on the PC and is not uploaded as audio. Text of what you said is included when voice reactions are on. If **Hear computer audio** is on, a local transcript of recent system audio can be included in that same request as text. Pause capture with Ctrl+Shift+F8 before anything you do not want in that request. The overlay window is marked so normal Windows screen capture should omit it. That exclusion is not reliable on every system; a capture taken during development on Linux still included the overlay. Pause capture before anything you do not want sent.

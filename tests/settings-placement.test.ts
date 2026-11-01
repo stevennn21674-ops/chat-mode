@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { clampPlacement, defaultPlacement } from '../src/shared/placement'
-import { applyPatch, DEFAULT_SETTINGS, usableProxyUrl } from '../src/shared/settings'
+import { aiModeSpecified, applyPatch, chatUsesService, defaultAiMode, DEFAULT_SETTINGS, usableProxyUrl } from '../src/shared/settings'
 import { readSettingsFile, writeSettingsFile } from '../src/shared/settings-file'
 
 describe('settings persistence', () => {
@@ -26,6 +26,7 @@ describe('settings persistence', () => {
     expect(next.enabled).toBe(false)
     expect(next.x).toBe(12)
     expect(next.ecoMode).toBe(true)
+    expect(next.aiMode).toBe(false)
     expect(next.hearComputerAudio).toBe(true)
     expect(next.captureIntervalSec).toBe(25)
     expect(next.maxCallsPerHour).toBe(20)
@@ -39,6 +40,15 @@ describe('settings persistence', () => {
     expect(bounded.captureIntervalSec).toBe(15)
     expect(bounded.maxCallsPerHour).toBe(120)
     expect(bounded.ecoMode).toBe(false)
+    expect(applyPatch(DEFAULT_SETTINGS, { aiMode: true }).aiMode).toBe(true)
+    expect(defaultAiMode(false, null)).toBe(false)
+    expect(defaultAiMode(true, null)).toBe(true)
+    expect(defaultAiMode(true, false)).toBe(false)
+    expect(aiModeSpecified({ aiMode: false })).toBe(false)
+    expect(aiModeSpecified({})).toBe(null)
+    expect(chatUsesService(false)).toBe(false)
+    expect(chatUsesService(true)).toBe(true)
+    expect(chatUsesService(false, true)).toBe(true)
     expect(bounded.hearComputerAudio).toBe(false)
     expect(JSON.stringify(bounded)).not.toContain('super-secret-value')
     expect(usableProxyUrl('ftp://nope')).toBe('')

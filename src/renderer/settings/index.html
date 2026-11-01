@@ -37,6 +37,8 @@
 
       <section class="card">
         <h2>Comment service</h2>
+        <label class="switch"><input id="ai" type="checkbox" /> AI mode</label>
+        <p class="hint">On sends chat to the service with your key, model, and eco limits. Off writes chat on this PC and does not use the network.</p>
         <label class="switch"><input id="eco" type="checkbox" /> Eco mode</label>
         <p class="hint">On by default. The screen is sent only when you press `. Unchanged screens are skipped, and calls stay under the hourly cap.</p>
         <label>Calls per hour <output id="cap-out"></output>

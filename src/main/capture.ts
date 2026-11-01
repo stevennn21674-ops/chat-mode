@@ -1,5 +1,6 @@
 import { desktopCapturer, nativeImage, screen, type NativeImage } from 'electron'
 import { differenceHash } from '../shared/frame-diff'
+import { dominantColorNames } from '../shared/screen-cues'
 
 export const DEMO_JPEG =
   '/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBxISEhUQEhIVFRUVFRUYFxUYFxcVFRgVFxUYHSggGBolGxUVITEhJSkrLi4uFx8zODMtNygtLisBCgoKDg0OGhAQGy0lHyUtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLf/AABEIAAMAAQMBIgACEQEDEQH/xAAbAAABBQEBAAAAAAAAAAAAAAADAAIEBQYBB//EABQBAQAAAAAAAAAAAAAAAAAAAAD/xAAVAQEBAAAAAAAAAAAAAAAAAAAAAf/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AJpA//9k='
@@ -7,6 +8,8 @@ export const DEMO_JPEG =
 export interface CapturedFrame {
   jpegBase64: string
   hash: string
+  colors: string[]
+  title: string | null
 }
 
 export function hashImage(image: NativeImage): string {
@@ -23,6 +26,35 @@ export function hashImage(image: NativeImage): string {
   return differenceHash(gray, 9, 8)
 }
 
+function colorsOf(image: NativeImage): string[] {
+  try {
+    const bitmap = image.toBitmap()
+    if (bitmap.length < 16) return []
+    return dominantColorNames(bitmap)
+  } catch {
+    return []
+  }
+}
+
+async function foregroundTitle(): Promise<string | null> {
+  try {
+    const windows = await desktopCapturer.getSources({
+      types: ['window'],
+      thumbnailSize: { width: 1, height: 1 },
+      fetchWindowIcons: false
+    })
+    for (const win of windows) {
+      const name = win.name?.trim()
+      if (!name) continue
+      if (/chat mode/i.test(name)) continue
+      return name.slice(0, 80)
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
 export async function capturePrimaryJpeg(): Promise<CapturedFrame | null> {
   const display = screen.getPrimaryDisplay()
   const sourceWidth = Math.max(1, display.size.width)
@@ -30,11 +62,14 @@ export async function capturePrimaryJpeg(): Promise<CapturedFrame | null> {
   const scale = 512 / Math.max(sourceWidth, sourceHeight)
   const width = Math.max(1, Math.round(sourceWidth * scale))
   const height = Math.max(1, Math.round(sourceHeight * scale))
-  const sources = await desktopCapturer.getSources({
-    types: ['screen'],
-    thumbnailSize: { width, height },
-    fetchWindowIcons: false
-  })
+  const [sources, title] = await Promise.all([
+    desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width, height },
+      fetchWindowIcons: false
+    }),
+    foregroundTitle()
+  ])
   if (sources.length === 0) return null
   const primary = sources.find((source) => source.display_id === String(display.id)) ?? sources[0]
   if (primary.thumbnail.isEmpty()) return null
@@ -42,6 +77,8 @@ export async function capturePrimaryJpeg(): Promise<CapturedFrame | null> {
   const hashed = nativeImage.createFromBuffer(jpeg)
   return {
     jpegBase64: jpeg.toString('base64'),
-    hash: hashed.isEmpty() ? '' : hashImage(hashed)
+    hash: hashed.isEmpty() ? '' : hashImage(hashed),
+    colors: colorsOf(primary.thumbnail),
+    title
   }
 }

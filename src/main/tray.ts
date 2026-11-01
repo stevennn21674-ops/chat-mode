@@ -8,6 +8,7 @@ interface TrayHandlers {
   setEnabled: (value: boolean) => void
   setScreen: (value: boolean) => void
   setVoice: (value: boolean) => void
+  setAiMode: (value: boolean) => void
   setPaused: (value: boolean) => void
   openSettings: () => void
   resetPosition: () => void
@@ -39,6 +40,12 @@ export function createTray(handlers: TrayHandlers): { tray: Tray; render: () => 
           type: 'checkbox',
           checked: settings.voiceEnabled,
           click: (item) => handlers.setVoice(item.checked)
+        },
+        {
+          label: 'AI mode',
+          type: 'checkbox',
+          checked: settings.aiMode,
+          click: (item) => handlers.setAiMode(item.checked)
         },
         {
           label: 'Pause screen capture',

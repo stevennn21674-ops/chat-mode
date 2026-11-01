@@ -33,6 +33,7 @@ const reset = document.querySelector('#reset') as HTMLButtonElement
 const status = document.querySelector('#status') as HTMLElement
 const speech = document.querySelector('#speech') as HTMLElement
 const hook = document.querySelector('#hook') as HTMLElement
+const ai = document.querySelector('#ai') as HTMLInputElement
 const eco = document.querySelector('#eco') as HTMLInputElement
 const cap = document.querySelector('#cap') as HTMLInputElement
 const capOut = document.querySelector('#cap-out') as HTMLOutputElement
@@ -64,6 +65,7 @@ function render(view: SettingsView): void {
   idleValue(font, String(view.fontSize))
   idleValue(proxy, view.proxyUrl)
   idleValue(token, view.proxyToken)
+  ai.checked = view.aiMode
   eco.checked = view.ecoMode
   idleValue(cap, String(view.maxCallsPerHour))
   idleValue(base, view.baseUrl)
@@ -77,6 +79,7 @@ function render(view: SettingsView): void {
   pause.textContent = view.capturePaused ? 'Resume screen capture' : 'Pause screen capture'
   if (view.capturePaused) status.textContent = 'Screen capture is paused.'
   else if (!view.screenReaction) status.textContent = 'Screen reactions are off.'
+  else if (!view.aiMode) status.textContent = 'AI mode is off. Press ` for a local screen read. Nothing is uploaded.'
   else if (view.analyzing) status.textContent = 'Screen is being analyzed.'
   else if (!view.serviceReady) status.textContent = 'Press ` when a key is saved. Until then the chat stays local.'
   else status.textContent = 'Press ` to send the screen.'
@@ -92,12 +95,18 @@ function render(view: SettingsView): void {
   if (mic.value !== view.micDeviceId && document.activeElement !== mic) mic.value = view.micDeviceId
   if (!view.encryptionAvailable) {
     keyHint.textContent = 'This PC cannot encrypt a key, so a typed key will not be saved.'
+  } else if (view.hasUserKey && !view.aiMode) {
+    keyHint.textContent = 'The key is encrypted on this PC. AI mode is off, so chat does not call the service.'
   } else if (view.hasUserKey) {
     keyHint.textContent = 'The key is encrypted on this PC. It is not written in plain text.'
-  } else if (view.hasFallbackKey) {
+  } else if (view.hasFallbackKey && view.aiMode) {
     keyHint.textContent = 'No key entered. A built-in fallback from the app build is used until you save one.'
-  } else {
+  } else if (view.hasFallbackKey) {
+    keyHint.textContent = 'A built-in fallback key is saved in this build. Turn AI mode on to use it.'
+  } else if (view.aiMode) {
     keyHint.textContent = 'Enter a key to turn on screen and voice reactions. Leave it blank to stay on local chat.'
+  } else {
+    keyHint.textContent = 'AI mode is off, so chat stays on this PC. Add a key and turn AI mode on to use the service.'
   }
 }
 
@@ -138,6 +147,7 @@ pause.addEventListener('click', () => {
 })
 reset.addEventListener('click', () => void window.settings.resetPosition())
 
+ai.addEventListener('change', () => void window.settings.update({ aiMode: ai.checked }))
 eco.addEventListener('change', () => void window.settings.update({ ecoMode: eco.checked }))
 cap.addEventListener('input', () => {
   capOut.textContent = cap.value
