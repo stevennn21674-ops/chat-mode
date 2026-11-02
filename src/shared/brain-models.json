@@ -1,0 +1,32 @@
+{
+  "runtime": {
+    "version": "b12032",
+    "win32": {
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b12032/llama-b12032-bin-win-cpu-x64.zip",
+      "bytes": 24582754,
+      "sha256": "5296f5d18bb7d422c7c26f4bb9bc796d9d4f41e1312a8c296cff475bdc60d0d4"
+    }
+  },
+  "models": {
+    "small": {
+      "label": "Small",
+      "file": "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+      "url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+      "bytes": 491400032,
+      "sha256": "0663b826e09042345d6e2069d9655cd3ae84812d8f39a5894bed7b24fc0e86cc",
+      "bundled": false,
+      "family": "Qwen2.5-0.5B-Instruct",
+      "quant": "Q4_K_M"
+    },
+    "medium": {
+      "label": "Medium",
+      "file": "qwen2.5-0.5b-instruct-q8_0.gguf",
+      "url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q8_0.gguf",
+      "bytes": 675710816,
+      "sha256": "4a774f8683c7a6ec686a4223565556409433745adf6e38fa5cba5bb0ad0e738e",
+      "bundled": true,
+      "family": "Qwen2.5-0.5B-Instruct",
+      "quant": "Q8_0"
+    }
+  }
+}

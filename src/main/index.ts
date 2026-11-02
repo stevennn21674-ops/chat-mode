@@ -4,11 +4,13 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { callsInWindow } from '../shared/budget'
 import { allowLookup, fetchWikiFact } from '../shared/lookup'
 import { effectivelyOffline } from '../shared/net'
+import { formatBytes, modelSpec } from '../shared/brain'
 import { aiModeSpecified, canReachService, defaultAiMode, usableProxyUrl } from '../shared/settings'
 import { startupStateReady } from '../shared/startup'
 import { readSettingsFile } from '../shared/settings-file'
 import { resolveService } from '../shared/service-defaults'
 import { PAUSE_HOTKEY, TALK_KEY, type ChatMessage, type MicDevice, type OverlayState, type SettingsView } from '../shared/types'
+import { BrainService } from './brain-service'
 import { ChatController } from './chat-controller'
 import { capturePrimaryJpeg, DEMO_JPEG } from './capture'
 import { testService } from './connection-test'
@@ -127,6 +129,16 @@ async function bootstrap(): Promise<void> {
   }
   const usage = new UsageStore(usageFile())
   const customs = new CustomStore(customViewersFile())
+  const brain = new BrainService({
+    userDataDir: app.getPath('userData'),
+    resourceDir: resourceDir('brain'),
+    log,
+    getSettings: () => store.settings,
+    notify: () => {
+      if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.webContents.send('settings:changed', view(false))
+    }
+  })
+  brain.startSampler()
   const wikiStamps: number[] = []
   const wikiCache = loadWikiCache(wikiCacheFile())
   let reachable = true
@@ -199,7 +211,12 @@ async function bootstrap(): Promise<void> {
     logVoice: logVoiceDebug,
     offline: () => effectivelyOffline(store.settings.offlineMode, reachable),
     customCrowd: () => customs.crowd,
-    lookup: (name) => lookupName(name)
+    lookup: (name) => lookupName(name),
+    brain: {
+      ready: () => brain.ready(),
+      cpu: () => brain.cpu(),
+      generate: (turn) => brain.generate(turn)
+    }
   })
 
   const overlay = new OverlayController(
@@ -281,6 +298,7 @@ async function bootstrap(): Promise<void> {
     const resolved = activeConfig()
     const power = powerState()
     const relay = usableProxyUrl(store.settings.proxyUrl)
+    const panel = brain.panel()
     return {
       ...store.settings,
       serviceReady: process.env.CHATMODE_DEMO === '1' || canReachService(store.settings, resolved),
@@ -300,7 +318,13 @@ async function bootstrap(): Promise<void> {
       callsThisHour: callsInWindow(usage.usage, Date.now()),
       onBattery: power.onBattery,
       idle: power.idle,
-      effectivelyOffline: effectivelyOffline(store.settings.offlineMode, reachable)
+      effectivelyOffline: effectivelyOffline(store.settings.offlineMode, reachable),
+      localBrainReady: panel.ready,
+      localBrainDownloading: panel.downloading,
+      localBrainDeletable: panel.deletable,
+      localBrainProgress: panel.progress,
+      localBrainNote: panel.note,
+      localBrainButton: panel.button
     }
   }
 
@@ -441,6 +465,7 @@ async function bootstrap(): Promise<void> {
       controller.setCapturePaused((patch as { capturePaused: boolean }).capturePaused)
     }
     store.update(patch)
+    brain.onSettings()
     if (store.settings.launchAtStartup !== before) applyLogin(store.settings.launchAtStartup)
     if (store.settings.hearComputerAudio !== heard) loopback.setEnabled(store.settings.hearComputerAudio)
     refresh()
@@ -451,6 +476,45 @@ async function bootstrap(): Promise<void> {
     return view()
   })
   ipcMain.handle('settings:mics', () => listMics(voice))
+  ipcMain.handle('brain:download', async () => {
+    if (effectivelyOffline(store.settings.offlineMode, reachable)) {
+      return { ok: false, detail: 'Offline, so the model was not downloaded. Local brain needs the network only for that download.' }
+    }
+    const spec = modelSpec(store.settings.brainSize)
+    const parent = settingsWindow && !settingsWindow.isDestroyed() ? settingsWindow : undefined
+    const again = brain.selectedOnDisk()
+    const options = {
+      type: 'question' as const,
+      buttons: ['Download', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'Download local brain',
+      message: again ? `Download the ${spec.label.toLowerCase()} model again?` : `Download the ${spec.label.toLowerCase()} model?`,
+      detail: `It is ${formatBytes(spec.bytes)}. After it is saved, local brain works with no network. You can delete it later to free disk.`
+    }
+    const confirm = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)
+    if (confirm.response !== 0) return { ok: false, detail: 'Download cancelled.' }
+    const result = await brain.download(store.settings.brainSize)
+    refresh()
+    return result
+  })
+  ipcMain.handle('brain:delete', async () => {
+    const parent = settingsWindow && !settingsWindow.isDestroyed() ? settingsWindow : undefined
+    const options = {
+      type: 'question' as const,
+      buttons: ['Delete', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Delete local brain',
+      message: 'Delete the local model from this PC?',
+      detail: 'This frees the space used by the small and medium models. Chat falls back to the built-in lines until you download a model again.'
+    }
+    const confirm = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)
+    if (confirm.response !== 0) return view(false)
+    brain.deleteModels()
+    refresh()
+    return view(false)
+  })
   ipcMain.handle('custom:get', () => customs.crowd)
   ipcMain.handle('custom:set', (_event, raw: unknown) => customs.replace(raw))
   ipcMain.handle('custom:export', async () => {
@@ -545,6 +609,8 @@ async function bootstrap(): Promise<void> {
     quitting = true
     loopback.setEnabled(false)
     controller.stop()
+    brain.stop()
+    brain.stopSampler()
     store.flush()
     globalShortcut.unregisterAll()
   })

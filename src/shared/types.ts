@@ -1,4 +1,6 @@
 export type Badge = 'mod' | 'sub' | 'vip' | null
+export type BrainSpeed = 'light' | 'normal' | 'heavy'
+export type BrainSize = 'small' | 'medium'
 export type MessageKind = 'chat' | 'donation' | 'sub' | 'raid' | 'hype' | 'system'
 
 export interface ChatMessage {
@@ -41,6 +43,9 @@ export interface AppSettings {
   showDebugTranscript: boolean
   offlineMode: boolean
   overlayMode: 'normal' | 'game'
+  localBrain: boolean
+  brainSpeed: BrainSpeed
+  brainSize: BrainSize
 }
 
 export interface OverlayState {
@@ -81,6 +86,12 @@ export interface SettingsView extends AppSettings {
   idle: boolean
   keySaved?: boolean
   effectivelyOffline: boolean
+  localBrainReady: boolean
+  localBrainDownloading: boolean
+  localBrainDeletable: boolean
+  localBrainProgress: number | null
+  localBrainNote: string
+  localBrainButton: string
 }
 
 export interface PointerEventPayload {

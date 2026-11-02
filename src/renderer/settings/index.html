@@ -43,7 +43,7 @@
       <section class="card">
         <h2>Comment service</h2>
         <label class="switch"><input id="ai" type="checkbox" /> AI mode</label>
-        <p class="hint">On sends chat to the service with your key, model, and eco limits. Off writes chat on this PC and does not use the network.</p>
+        <p class="hint">On sends chat to the service with your key, model, and eco limits. Off keeps chat on this PC. Local brain, below, can read what you say without a key. The built-in lines are used when that model is off or unavailable.</p>
         <label class="switch"><input id="eco" type="checkbox" /> Eco mode</label>
         <p class="hint">On by default. The screen is sent only when you press `. Unchanged screens are skipped, and calls stay under the hourly cap.</p>
         <label>Calls per hour <output id="cap-out"></output>
@@ -70,6 +70,32 @@
       </section>
 
       <section class="card">
+        <h2>Local brain (offline understanding)</h2>
+        <label class="switch"><input id="local-brain" type="checkbox" /> Use the on-device model when AI mode is off</label>
+        <p class="hint">The medium model is included with the app, so it works right after install. It is a small Qwen model and is less accurate than the cloud model. It reads the mic, computer audio, window title, and viewer notes on this PC. No network is needed after the file is on disk. Ban commands still use the built-in parser.</p>
+        <label>Brain speed
+          <select id="brain-speed">
+            <option value="light">Light</option>
+            <option value="normal">Normal</option>
+            <option value="heavy">Heavy</option>
+          </select>
+        </label>
+        <p class="hint">Light waits longer and uses one CPU thread. Heavy answers sooner and uses more CPU. If the PC is already busy, chat falls back to the built-in lines.</p>
+        <label>Model size
+          <select id="brain-size">
+            <option value="medium">Medium (included, more accurate)</option>
+            <option value="small">Small (faster, separate download)</option>
+          </select>
+        </label>
+        <p id="brain-note" class="hint"></p>
+        <progress id="brain-progress" max="100" value="0" hidden></progress>
+        <div class="actions">
+          <button id="brain-download" type="button">Download model</button>
+          <button id="brain-delete" type="button">Delete model</button>
+        </div>
+      </section>
+
+      <section class="card">
         <label>Chat speed <output id="speed-out"></output>
           <input id="speed" type="range" min="1" max="7" step="1" />
         </label>
@@ -92,7 +118,7 @@
 
       <section class="card">
         <h2>Custom viewers</h2>
-        <p class="hint">Saved on this PC. Mods can answer ban commands. Haters stay light. AI mode uses the description; offline chat uses the sliders and catchphrases.</p>
+        <p class="hint">Saved on this PC. Mods can answer ban commands. Haters stay light. AI mode and local brain use the description. The built-in lines use the sliders and catchphrases.</p>
         <div id="custom-list"></div>
         <div class="actions">
           <button id="custom-add" type="button">Add viewer</button>

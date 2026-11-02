@@ -101,7 +101,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
   outline-offset: 2px;
 }
 
-#reset, #custom-delete, #custom-haters, #custom-export { background: #2a2f3d; }
+#reset, #custom-delete, #custom-haters, #custom-export, #brain-delete { background: #2a2f3d; }
+progress { width: 100%; height: 12px; accent-color: #6d5efc; }
 textarea { resize: vertical; }
 .viewer-row { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin: 4px 0; }
 .viewer-row button { background: #2a2f3d; padding: 4px 8px; }

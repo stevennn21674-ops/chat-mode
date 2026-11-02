@@ -16,6 +16,7 @@ import { demoModelJson } from '../shared/demo'
 import { usableTranscript } from '../shared/speech'
 import { frameUnchanged } from '../shared/frame-diff'
 import { makeFallbackMessages } from '../shared/fallback'
+import { brainDecision, paceFor, type BrainTurn } from '../shared/brain'
 import { echoWords, makeLocalMessages } from '../shared/local-chat'
 import { ingest, lookupCandidate, referenceLine, compactContext, createKnowledge, type Knowledge } from '../shared/knowledge'
 import { createMemory, detectIntent, noteText, recentTopics, type TermMemory } from '../shared/nlu'
@@ -46,6 +47,11 @@ interface ControllerDeps {
   offline?: () => boolean
   customCrowd?: () => CustomCrowd
   lookup?: (name: string) => Promise<string | null>
+  brain?: {
+    ready: () => boolean
+    cpu: () => number | null
+    generate: (turn: BrainTurn) => Promise<ChatMessage[] | null>
+  }
 }
 
 export class ChatController {
@@ -80,6 +86,9 @@ export class ChatController {
   private loud = false
   private facts = new Map<string, string>()
   private looked = new Set<string>()
+  private brainAt = 0
+  private brainBusy = false
+  private windowTitle = ''
 
   constructor(private deps: ControllerDeps) {}
 
@@ -162,7 +171,7 @@ export class ChatController {
   }
 
   async listenAmbient(): Promise<void> {
-    if (!this.alive || this.busy) return
+    if (!this.alive || this.busy || this.brainBusy) return
     const settings = this.deps.getSettings()
     if (!settings.enabled || !settings.hearComputerAudio) return
     this.busy = true
@@ -171,8 +180,10 @@ export class ChatController {
       const heard = await this.heardAudio(settings)
       if (!heard.length && !this.loud) return
       if (heard[0] === before && !this.loud) return
-      const avoid = new Set(this.avoid.map((name) => name.toLowerCase()))
-      this.enqueue(this.localBatch(2, avoid, null))
+      if (!this.holdBrain(settings)) {
+        const avoid = new Set(this.avoid.map((name) => name.toLowerCase()))
+        this.enqueue(this.localBatch(2, avoid, null))
+      }
       void this.maybeLookup()
       this.publish()
     } catch {
@@ -219,8 +230,10 @@ export class ChatController {
     this.idleFill(3)
   }
 
-  private enqueue(messages: ChatMessage[]): void {
-    this.pending.push(...scheduleMessages(messages, this.deps.getSettings().speedLevel, Date.now()))
+  private enqueue(messages: ChatMessage[], spreadMs = 0): void {
+    const now = Date.now()
+    const scheduled = scheduleMessages(messages, this.deps.getSettings().speedLevel, now)
+    this.pending.push(...(spreadMs > 0 ? coverInterval(scheduled, now, spreadMs) : scheduled))
     this.pending.sort((a, b) => a.at - b.at)
     if (this.pending.length > 16) this.pending.length = 16
   }
@@ -265,6 +278,14 @@ export class ChatController {
     const avoid = new Set(this.avoid.map((name) => name.toLowerCase()))
     const settings = this.deps.getSettings()
     if (!chatUsesService(settings.aiMode, process.env.CHATMODE_DEMO === '1')) {
+      if (this.holdBrain(settings)) {
+        const decision = this.brainGate(settings)
+        if (decision === 'wait') return
+        if (decision === 'run') {
+          void this.fillFromBrain(count, null)
+          return
+        }
+      }
       this.enqueue(this.localBatch(count, avoid, null))
       return
     }
@@ -444,16 +465,25 @@ export class ChatController {
   }
 
   private async tick(): Promise<void> {
-    if (!this.alive || this.busy) return
+    if (!this.alive || this.busy || this.brainBusy) return
     const settings = this.deps.getSettings()
     if (!settings.enabled) return
     this.advanceCrowd()
     const slots = chatSlots(this.crowd)
-    if (slots > 1 && this.pending.length < 2) this.idleFill(2)
-    else if (slots === 1 && this.pending.length < 1) this.idleFill(1)
     const wantVoice = this.voicePending
     const wantCapture = this.capturePending && settings.screenReaction && !settings.capturePaused
-    if (!wantVoice && !wantCapture) return
+    const brainHeld = this.holdBrain(settings)
+    if (!brainHeld) {
+      if (slots > 1 && this.pending.length < 2) this.idleFill(2)
+      else if (slots === 1 && this.pending.length < 1) this.idleFill(1)
+    }
+    if (!wantVoice && !wantCapture) {
+      if (brainHeld) {
+        if (slots > 1 && this.pending.length < 2) this.idleFill(2)
+        else if (slots === 1 && this.pending.length < 1) this.idleFill(1)
+      }
+      return
+    }
     this.voicePending = false
     this.capturePending = false
     if (this.deps.offline?.() || !chatUsesService(settings.aiMode, process.env.CHATMODE_DEMO === '1')) {
@@ -499,9 +529,69 @@ export class ChatController {
 
   private noteTitle(title: string | null | undefined): void {
     if (!title) return
+    this.windowTitle = title.slice(0, 120)
     const now = Date.now()
     noteText(this.memory, title, now)
     ingest(this.knowledge, title, 'title', now)
+  }
+
+  private holdBrain(settings: AppSettings): boolean {
+    return Boolean(this.deps.brain && settings.localBrain && !settings.aiMode && process.env.CHATMODE_DEMO !== '1')
+  }
+
+  private brainGate(settings: AppSettings): 'run' | 'wait' | 'fallback' {
+    return brainDecision({
+      enabled: this.holdBrain(settings),
+      ready: this.deps.brain?.ready() ?? false,
+      cpuPercent: this.deps.brain?.cpu() ?? null,
+      lastAt: this.brainAt,
+      now: Date.now(),
+      pace: paceFor(settings.brainSpeed)
+    })
+  }
+
+  private brainTurn(screenTitle: string | null): BrainTurn {
+    const custom = this.deps.customCrowd?.() ?? { viewers: [], randomNames: [] }
+    return {
+      transcripts: [...this.transcripts],
+      pcAudio: [...this.pcLines],
+      recentLines: [...this.recentLines],
+      windowTitle: screenTitle || this.windowTitle || null,
+      context: compactContext(this.knowledge, Date.now()),
+      customBlock: customPromptBlock(
+        custom.viewers.filter((viewer) => viewer.active && !isBanned(this.crowd, viewer.username)),
+        custom.randomNames
+      ),
+      boredom: this.crowd.boredom,
+      viewerCount: this.crowd.count,
+      avoid: [...this.avoid],
+      now: Date.now(),
+      rng: Math.random
+    }
+  }
+
+  private async fillFromBrain(count: number, screen: ScreenCue | null): Promise<void> {
+    if (this.brainBusy || this.busy) return
+    const settings = this.deps.getSettings()
+    if (!this.holdBrain(settings)) return
+    this.brainBusy = true
+    this.brainAt = Date.now()
+    try {
+      const messages = await this.deps.brain?.generate(this.brainTurn(screen?.title ?? null))
+      if (!this.alive || !this.holdBrain(this.deps.getSettings())) return
+      if (messages?.length) this.enqueue(messages, paceFor(this.deps.getSettings().brainSpeed).intervalMs)
+      else {
+        const avoid = new Set(this.avoid.map((name) => name.toLowerCase()))
+        this.enqueue(this.localBatch(count, avoid, screen))
+      }
+    } catch {
+      if (!this.alive || !this.holdBrain(this.deps.getSettings())) return
+      const avoid = new Set(this.avoid.map((name) => name.toLowerCase()))
+      this.enqueue(this.localBatch(count, avoid, screen))
+    } finally {
+      this.brainBusy = false
+      this.publish()
+    }
   }
 
   private async maybeLookup(): Promise<void> {
@@ -542,9 +632,23 @@ export class ChatController {
       }
       const avoid = new Set(this.avoid.map((name) => name.toLowerCase()))
       const count = Math.max(2, Math.min(4, chatSlots(this.crowd) + 1))
-      this.enqueue(
-        this.localBatch(count, avoid, signal)
-      )
+      if (this.holdBrain(settings)) {
+        const decision = this.brainGate(settings)
+        if (decision === 'run') {
+          this.brainAt = Date.now()
+          const messages = await this.deps.brain?.generate(this.brainTurn(signal?.title ?? null))
+          if (controller.signal.aborted || !this.alive) return
+          if (messages?.length && this.holdBrain(this.deps.getSettings())) {
+            this.enqueue(messages, paceFor(this.deps.getSettings().brainSpeed).intervalMs)
+            this.publish()
+            return
+          }
+        } else if (decision === 'wait' && this.pending.length >= 2) {
+          this.publish()
+          return
+        }
+      }
+      this.enqueue(this.localBatch(count, avoid, signal))
       this.publish()
     } catch {
       this.deps.log('local chat failed')

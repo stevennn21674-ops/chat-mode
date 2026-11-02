@@ -13,6 +13,8 @@ interface SettingsBridge {
   customSet(crowd: CustomCrowd): Promise<CustomCrowd>
   customExport(): Promise<boolean>
   customImport(): Promise<CustomCrowd>
+  downloadBrain(): Promise<{ ok: boolean; detail: string }>
+  deleteBrain(): Promise<SettingsView>
   onChange(callback: (view: SettingsView) => void): () => void
 }
 
@@ -44,6 +46,13 @@ const status = document.querySelector('#status') as HTMLElement
 const speech = document.querySelector('#speech') as HTMLElement
 const hook = document.querySelector('#hook') as HTMLElement
 const ai = document.querySelector('#ai') as HTMLInputElement
+const localBrain = document.querySelector('#local-brain') as HTMLInputElement
+const brainSpeed = document.querySelector('#brain-speed') as HTMLSelectElement
+const brainSize = document.querySelector('#brain-size') as HTMLSelectElement
+const brainNote = document.querySelector('#brain-note') as HTMLElement
+const brainProgress = document.querySelector('#brain-progress') as HTMLProgressElement
+const brainDownload = document.querySelector('#brain-download') as HTMLButtonElement
+const brainDelete = document.querySelector('#brain-delete') as HTMLButtonElement
 const eco = document.querySelector('#eco') as HTMLInputElement
 const cap = document.querySelector('#cap') as HTMLInputElement
 const capOut = document.querySelector('#cap-out') as HTMLOutputElement
@@ -80,6 +89,15 @@ function render(view: SettingsView): void {
   idleValue(proxy, view.proxyUrl)
   idleValue(token, view.proxyToken)
   ai.checked = view.aiMode
+  localBrain.checked = view.localBrain
+  if (document.activeElement !== brainSpeed) brainSpeed.value = view.brainSpeed
+  if (document.activeElement !== brainSize) brainSize.value = view.brainSize
+  brainNote.textContent = view.localBrainNote
+  brainDownload.textContent = view.localBrainButton
+  brainDownload.disabled = view.localBrainDownloading
+  brainDelete.disabled = view.localBrainDownloading || !view.localBrainDeletable
+  brainProgress.hidden = view.localBrainProgress === null
+  if (view.localBrainProgress !== null) brainProgress.value = Math.round(view.localBrainProgress * 100)
   eco.checked = view.ecoMode
   idleValue(cap, String(view.maxCallsPerHour))
   idleValue(base, view.baseUrl)
@@ -93,6 +111,7 @@ function render(view: SettingsView): void {
   pause.textContent = view.capturePaused ? 'Resume screen capture' : 'Pause screen capture'
   if (view.capturePaused) status.textContent = 'Screen capture is paused.'
   else if (!view.screenReaction) status.textContent = 'Screen reactions are off.'
+  else if (!view.aiMode && view.localBrain && view.localBrainReady) status.textContent = 'AI mode is off. Local brain is answering on this PC. Nothing is uploaded.'
   else if (!view.aiMode) status.textContent = 'AI mode is off. Press ` for a local screen read. Nothing is uploaded.'
   else if (view.analyzing) status.textContent = 'Screen is being analyzed.'
   else if (!view.serviceReady) status.textContent = 'Press ` when a key is saved. Until then the chat stays local.'
@@ -165,6 +184,27 @@ pause.addEventListener('click', () => {
 reset.addEventListener('click', () => void window.settings.resetPosition())
 
 ai.addEventListener('change', () => void window.settings.update({ aiMode: ai.checked }))
+localBrain.addEventListener('change', () => void window.settings.update({ localBrain: localBrain.checked }))
+brainSpeed.addEventListener('change', () => {
+  const speed = brainSpeed.value
+  if (speed === 'light' || speed === 'normal' || speed === 'heavy') void window.settings.update({ brainSpeed: speed })
+})
+brainSize.addEventListener('change', () => {
+  const size = brainSize.value
+  if (size === 'small' || size === 'medium') void window.settings.update({ brainSize: size })
+})
+brainDownload.addEventListener('click', () => {
+  brainDownload.disabled = true
+  void window.settings.downloadBrain().finally(() => {
+    brainDownload.disabled = brainProgress.hidden === false
+  })
+})
+brainDelete.addEventListener('click', () => {
+  brainDelete.disabled = true
+  void window.settings.deleteBrain().finally(() => {
+    brainDelete.disabled = false
+  })
+})
 eco.addEventListener('change', () => void window.settings.update({ ecoMode: eco.checked }))
 cap.addEventListener('input', () => {
   capOut.textContent = cap.value

@@ -63,7 +63,7 @@ Set `UPSTREAM_URL` to `https://apihub.agnes-ai.com/v1/chat/completions`. The wor
 
 ## AI mode off
 
-When AI mode is off, chat does not call the comment service. If offline mode is off and the PC is online, the app may request a short public Wikipedia summary for a game or a repeated name. Those calls send the name only, are cached locally, and stop when offline mode is on or the reachability check fails. **Test connection** is separate, runs only when you click it, and is skipped while the app is offline. Pressing backtick can still capture the screen on this PC so local chat can measure how much the picture changed, its main colors, and a window title. That image is not uploaded.
+When AI mode is off, chat does not call the comment service. Local brain, when it is on and the model is on disk, writes those lines on this PC and does not upload them. The medium model is included with the Windows build. Download and re-download, which run only after you confirm the size, fetch the model file from Hugging Face. Delete model removes it from this PC. If offline mode is off and the PC is online, the app may also request a short public Wikipedia summary for a game or a repeated name. Those calls send the name only, are cached locally, and stop when offline mode is on or the reachability check fails. **Test connection** is separate, runs only when you click it, and is skipped while the app is offline. Pressing backtick can still capture the screen on this PC so local chat can measure how much the picture changed, its main colors, and a window title. That image is not uploaded.
 
 ## What the app sends
 

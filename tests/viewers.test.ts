@@ -151,7 +151,7 @@ describe('startup order', () => {
   it('initializes startup state before tray or main can read it', () => {
     expect(startupStateReady()).toBe(true)
     const root = join(import.meta.dirname, '..')
-    for (const file of ['src/main/tray.ts', 'src/main/index.ts', 'src/shared/startup.ts']) {
+    for (const file of ['src/main/tray.ts', 'src/main/index.ts', 'src/main/brain-service.ts', 'src/shared/startup.ts']) {
       expect(findTopLevelLetUseBeforeInit(readFileSync(join(root, file), 'utf8')), file).toEqual([])
     }
     const early = 'render()\nlet aiModeDefault = false\nfunction render() {\n  return aiModeDefault\n}\n'

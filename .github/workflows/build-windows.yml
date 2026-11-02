@@ -40,6 +40,15 @@ jobs:
       - name: Download the on-device speech model
         run: node scripts/fetch-whisper.mjs
 
+      - name: Cache the local brain
+        uses: actions/cache@v4
+        with:
+          path: resources/brain
+          key: brain-qwen25-0.5b-q8-4a774f86-llama-b12032-${{ runner.os }}-x64
+
+      - name: Download the bundled local model
+        run: node scripts/fetch-brain.mjs
+
       - name: Test
         run: npm test
 
@@ -56,9 +65,20 @@ jobs:
           $setup = $exes | Where-Object { $_.Name -notlike "*portable*" } | Select-Object -First 1
           if (-not $portable) { throw "Portable exe was not produced" }
           if (-not $setup) { throw "NSIS installer was not produced" }
-          Compress-Archive -Path $portable.FullName -DestinationPath "release/ChatMode-portable.zip" -Force
-          Write-Host "Installer: $($setup.Name)"
-          Write-Host "Portable: $($portable.Name)"
+          $limit = 1800MB
+          Write-Host "Installer: $($setup.Name) $($setup.Length) bytes"
+          Write-Host "Portable: $($portable.Name) $($portable.Length) bytes"
+          if ($portable.Length -gt $limit) {
+            Write-Host "Portable exe is over 1.8 GB, so the zip asset is skipped."
+          } else {
+            Compress-Archive -Path $portable.FullName -DestinationPath "release/ChatMode-portable.zip" -Force
+            $zip = Get-Item "release/ChatMode-portable.zip"
+            Write-Host "Zip: $($zip.Name) $($zip.Length) bytes"
+            if ($zip.Length -gt $limit) {
+              Remove-Item $zip.FullName -Force
+              Write-Host "Zip was over 1.8 GB, so it was dropped."
+            }
+          }
 
       - name: Upload installer and portable zip
         uses: actions/upload-artifact@v4

@@ -33,6 +33,12 @@ contextBridge.exposeInMainWorld('settings', {
   customImport(): Promise<CustomCrowd> {
     return ipcRenderer.invoke('custom:import')
   },
+  downloadBrain(): Promise<{ ok: boolean; detail: string }> {
+    return ipcRenderer.invoke('brain:download')
+  },
+  deleteBrain(): Promise<SettingsView> {
+    return ipcRenderer.invoke('brain:delete')
+  },
   onChange(callback: (view: SettingsView) => void): () => void {
     const listener = (_event: unknown, view: SettingsView): void => callback(view)
     ipcRenderer.on('settings:changed', listener)

@@ -34,7 +34,7 @@ Some viewers are moderators and show a green sword. Hold V and say `ban <name>`,
 
 The tray icon can show or hide the chat, turn screen reactions, voice, AI mode, and offline mode on or off, switch game mode, pause capture, reset the chat to the right side of the screen, and open settings. Hover the icon to see whether a capture is in flight. The tooltip adds **offline** when offline mode is on or the PC has no internet.
 
-Settings also covers the comment service, eco mode, **Hear computer audio**, the microphone, launch at startup, opacity, font size, and an optional relay. See [docs/SECURITY.md](docs/SECURITY.md).
+Settings also covers the comment service, eco mode, **Local brain**, **Hear computer audio**, the microphone, launch at startup, opacity, font size, and an optional relay. See [docs/SECURITY.md](docs/SECURITY.md).
 
 **Hear computer audio** is on by default. On Windows the app captures system audio with a desktop loopback, keeps about the last 18 seconds, and transcribes it on this PC with the same whisper.cpp pipeline as the microphone. Silence is skipped. A pass runs about every 20 seconds, and again when you press backtick or finish talking, so chat can follow a game or a video. Whisper cannot tell speakers apart; the text is just what the PC played. The app keeps about 20 minutes of that, plus mic lines and window titles, and notes repeated names, places, and whether the moment sounds scared, like a fight, a win, or exploring. Turn it off in Settings if you do not want that sound included.
 
@@ -45,6 +45,10 @@ With AI mode off and a connection available, a few names or game titles can be l
 ## Comment service and eco mode
 
 **AI mode** is a checkbox in Settings and a tray item. On uses the comment service below, with the key and model you set and the same eco limits as before. The request also includes a short note of recent sounds, names, and what seems to be happening. That does not add another call. Off does not send any chat request: messages are built on this PC. The local chat tracks words from the mic, computer audio, and window titles, and it answers questions, greetings, scares, wins, and losses in different voices (hype, lurker, light troll, mod, backseat, questioner). Lines can quote you, misspell, stretch letters, or stack letters. Echoed words go through the kid-friendly filter. A backtick capture is not sent to a vision model while AI mode is off. Local chat only sees cheap signals: how much the picture changed, the main colors, and the window title when the system provides one.
+
+**Local brain** is a separate checkbox, on by default. With AI mode off and the model file present, viewer lines are written by a small on-device model instead of the built-in templates. It sees the same kind of context the cloud path uses: the mic transcript, the computer-audio story, the window title, custom viewer personalities, and whether the room is bored. Several viewers are written in one pass. It runs at low priority, caps the reply, and waits about 6 to 10 seconds between passes. **Brain speed** is light, normal, or heavy. If the CPU is already busy, or the model is missing, slow, or errors, chat falls back to the built-in lines. Ban commands still use the built-in parser. The kid-friendly filter still applies. The model is smaller and less accurate than the cloud model.
+
+The included model is Qwen2.5-0.5B-Instruct Q8 (about 644 MB). A faster Q4 build (about 469 MB) is the small size and is not in the installer; Settings asks before downloading it and shows the size. The download can resume, and **Delete model** removes the copies from this PC. After the file is on disk, local brain does not use the network, including in offline mode. The Windows build also ships a CPU build of llama.cpp beside the app, not inside the asar archive. The model is not inside the asar archive either.
 
 **Custom viewers** are edited in Settings, saved in the app data folder, and can be imported or exported as JSON. Each one has a role, color, a short personality, sliders, catchphrases, and topics. There is a hater preset and a list of extra random usernames. AI mode puts the active personalities in the prompt. With AI mode off, those sliders and phrases shape the lines. A custom moderator can be the one who answers a voice ban. Haters only tease lightly.
 
@@ -97,7 +101,7 @@ On Windows that downloads the speech executable and model into `resources/whispe
 
 ## Windows build
 
-The GitHub Actions workflow [Build Windows](.github/workflows/build-windows.yml) runs on `windows-latest` with Node 22.23.4. It caches npm and the speech-model download, runs the tests, and builds without a repository secret. It uploads:
+The GitHub Actions workflow [Build Windows](.github/workflows/build-windows.yml) runs on `windows-latest` with Node 22.23.4. It caches npm, the speech-model download, and the bundled local-brain model, runs the tests, and builds without a repository secret. The local model is downloaded in that job and packed next to the app. It is not committed to the repo. It uploads:
 
 - an NSIS installer (`.exe`)
 - a portable `.exe`, also zipped
@@ -126,7 +130,8 @@ These were not verified on a real Windows desktop in this environment. The code 
 - Whether Windows screen capture omits the overlay. The window is marked to be excluded. On the Linux desktop used during development, capture itself worked, and the overlay was still visible in the image.
 - Click-through, right-drag moving, and the installer or portable exe themselves.
 - Launch at startup. The setting is stored, and it is applied only in a packaged build.
-- The viewer-count header, green sword badge, and AI mode checkbox layout on a real Windows desktop.
+- The viewer-count header, green sword badge, AI mode checkbox, and local brain settings on a real Windows desktop.
+- The bundled llama.cpp runtime: loading Qwen2.5-0.5B-Instruct, low-priority CPU use, brain speed, the busy-CPU fallback, delete, and a resumed download. Those paths were not run on Windows here.
 - The foreground window title used by offline chat. It depends on the Windows window list and can be missing.
 
 Other limits:

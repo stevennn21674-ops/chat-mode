@@ -8,6 +8,8 @@ dist/
 src/main/generated/sealed-secret.json
 resources/whisper/*
 !resources/whisper/.gitkeep
+resources/brain/**
+!resources/brain/.gitkeep
 *.log
 .DS_Store
 *.wav

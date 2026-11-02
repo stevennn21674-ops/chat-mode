@@ -26,7 +26,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   aiMode: false,
   showDebugTranscript: false,
   offlineMode: false,
-  overlayMode: 'normal'
+  overlayMode: 'normal',
+  localBrain: true,
+  brainSpeed: 'normal',
+  brainSize: 'medium'
 }
 
 function finiteNumber(value: unknown): number | null {
@@ -119,6 +122,9 @@ export function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   if (typeof raw.showDebugTranscript === 'boolean') next.showDebugTranscript = raw.showDebugTranscript
   if (typeof raw.offlineMode === 'boolean') next.offlineMode = raw.offlineMode
   if (raw.overlayMode === 'normal' || raw.overlayMode === 'game') next.overlayMode = raw.overlayMode
+  if (typeof raw.localBrain === 'boolean') next.localBrain = raw.localBrain
+  if (raw.brainSpeed === 'light' || raw.brainSpeed === 'normal' || raw.brainSpeed === 'heavy') next.brainSpeed = raw.brainSpeed
+  if (raw.brainSize === 'small' || raw.brainSize === 'medium') next.brainSize = raw.brainSize
   const interval = finiteNumber(raw.captureIntervalSec)
   if (interval !== null) {
     next.captureIntervalSec = clamp(Math.round(interval), LIMITS.intervalMin, LIMITS.intervalMax)
