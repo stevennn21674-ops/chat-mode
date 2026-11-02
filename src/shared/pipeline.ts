@@ -29,6 +29,8 @@ export interface ProduceInput {
   batchCount: number
   maxTokens: number
   backoffMs: number
+  context?: string
+  customBlock?: string
 }
 
 export interface ProduceOutput {
@@ -95,14 +97,15 @@ export async function produceReactions(input: ProduceInput, deps: ProduceDeps): 
     url: resolveCompletionsUrl(proxy, input.endpoint),
     apiKey: proxy ? input.proxyToken : input.apiKey,
     model: input.model,
-    system: buildSystemPrompt(),
+    system: buildSystemPrompt(input.customBlock),
     userText: buildUserText({
       transcripts: input.transcripts,
       pcAudio: input.pcAudio,
       recentLines: input.recentLines,
       avoidUsernames: input.avoidUsernames,
       batchCount: input.batchCount,
-      hasImage: includeImage
+      hasImage: includeImage,
+      context: input.context
     }),
     imageBase64: includeImage ? input.imageBase64 : null,
     maxTokens: input.maxTokens

@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { CustomCrowd } from '../shared/custom-viewers'
 import type { MicDevice, SettingsView } from '../shared/types'
 
 contextBridge.exposeInMainWorld('settings', {
@@ -19,6 +20,18 @@ contextBridge.exposeInMainWorld('settings', {
   },
   test(draft: { apiKey: string; model: string; baseUrl: string }): Promise<{ ok: boolean; detail: string }> {
     return ipcRenderer.invoke('settings:test', draft)
+  },
+  customGet(): Promise<CustomCrowd> {
+    return ipcRenderer.invoke('custom:get')
+  },
+  customSet(crowd: CustomCrowd): Promise<CustomCrowd> {
+    return ipcRenderer.invoke('custom:set', crowd)
+  },
+  customExport(): Promise<boolean> {
+    return ipcRenderer.invoke('custom:export')
+  },
+  customImport(): Promise<CustomCrowd> {
+    return ipcRenderer.invoke('custom:import')
   },
   onChange(callback: (view: SettingsView) => void): () => void {
     const listener = (_event: unknown, view: SettingsView): void => callback(view)

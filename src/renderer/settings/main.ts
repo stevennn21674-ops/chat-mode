@@ -1,4 +1,6 @@
+import type { CustomCrowd } from '@shared/custom-viewers'
 import type { MicDevice, SettingsView } from '@shared/types'
+import { mountCustom } from './custom'
 
 interface SettingsBridge {
   get(): Promise<SettingsView>
@@ -7,6 +9,10 @@ interface SettingsBridge {
   listMics(): Promise<MicDevice[]>
   setKey(key: string): Promise<SettingsView>
   test(draft: { apiKey: string; model: string; baseUrl: string }): Promise<{ ok: boolean; detail: string }>
+  customGet(): Promise<CustomCrowd>
+  customSet(crowd: CustomCrowd): Promise<CustomCrowd>
+  customExport(): Promise<boolean>
+  customImport(): Promise<CustomCrowd>
   onChange(callback: (view: SettingsView) => void): () => void
 }
 
@@ -21,6 +27,10 @@ const screen = document.querySelector('#screen') as HTMLInputElement
 const voice = document.querySelector('#voice') as HTMLInputElement
 const pcAudio = document.querySelector('#pc-audio') as HTMLInputElement
 const startup = document.querySelector('#startup') as HTMLInputElement
+const offline = document.querySelector('#offline') as HTMLInputElement
+const debugTranscript = document.querySelector('#debug-transcript') as HTMLInputElement
+const gameMode = document.querySelector('#game-mode') as HTMLInputElement
+const offlineNote = document.querySelector('#offline-note') as HTMLElement
 const mic = document.querySelector('#mic') as HTMLSelectElement
 const speed = document.querySelector('#speed') as HTMLInputElement
 const opacity = document.querySelector('#opacity') as HTMLInputElement
@@ -60,6 +70,10 @@ function render(view: SettingsView): void {
   voice.checked = view.voiceEnabled
   pcAudio.checked = view.hearComputerAudio
   startup.checked = view.launchAtStartup
+  offline.checked = view.offlineMode
+  debugTranscript.checked = view.showDebugTranscript
+  gameMode.checked = view.overlayMode === 'game'
+  offlineNote.textContent = view.effectivelyOffline && !view.offlineMode ? 'No internet right now, so chat is staying offline.' : ''
   idleValue(speed, String(view.speedLevel))
   idleValue(opacity, String(Math.round(view.opacity * 100)))
   idleValue(font, String(view.fontSize))
@@ -129,6 +143,9 @@ screen.addEventListener('change', () => void window.settings.update({ screenReac
 voice.addEventListener('change', () => void window.settings.update({ voiceEnabled: voice.checked }))
 pcAudio.addEventListener('change', () => void window.settings.update({ hearComputerAudio: pcAudio.checked }))
 startup.addEventListener('change', () => void window.settings.update({ launchAtStartup: startup.checked }))
+offline.addEventListener('change', () => void window.settings.update({ offlineMode: offline.checked }))
+debugTranscript.addEventListener('change', () => void window.settings.update({ showDebugTranscript: debugTranscript.checked }))
+gameMode.addEventListener('change', () => void window.settings.update({ overlayMode: gameMode.checked ? 'game' : 'normal' }))
 mic.addEventListener('change', () => void window.settings.update({ micDeviceId: mic.value }))
 speed.addEventListener('input', () => {
   speedOut.textContent = `${speed.value} / 7`
@@ -200,3 +217,9 @@ window.settings.onChange(render)
 const initial = await window.settings.get()
 render(initial)
 await loadMics(initial.micDeviceId)
+await mountCustom({
+  get: () => window.settings.customGet(),
+  set: (crowd) => window.settings.customSet(crowd),
+  exportFile: () => window.settings.customExport(),
+  importFile: () => window.settings.customImport()
+})

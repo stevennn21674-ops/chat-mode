@@ -26,6 +26,7 @@ const micLabel = document.querySelector('#mic-label') as HTMLElement
 const hype = document.querySelector('#hype') as HTMLElement
 const hypeLabel = document.querySelector('#hype-label') as HTMLElement
 const hypeFill = document.querySelector('#hype-fill') as HTMLElement
+const debug = document.querySelector('#debug') as HTMLElement
 
 let stick = true
 let speedTimer = 0
@@ -184,6 +185,13 @@ function applyState(state: OverlayState): void {
   paused.classList.toggle('hidden', !state.capturePaused)
   mic.classList.toggle('hidden', !state.micLive && !state.micNote)
   micLabel.textContent = state.micNote || 'Mic live'
+  if (state.debugText) {
+    debug.textContent = state.debugText
+    debug.classList.remove('hidden')
+  } else {
+    debug.textContent = ''
+    debug.classList.add('hidden')
+  }
   if (state.speedFlash !== lastFlash) {
     lastFlash = state.speedFlash
     if (state.speedFlash > 0) {

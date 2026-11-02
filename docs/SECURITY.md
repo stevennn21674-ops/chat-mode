@@ -63,7 +63,7 @@ Set `UPSTREAM_URL` to `https://apihub.agnes-ai.com/v1/chat/completions`. The wor
 
 ## AI mode off
 
-When AI mode is off, chat does not call the comment service or any other network API. Pressing backtick can still capture the screen on this PC so local chat can measure how much the picture changed, its main colors, and a window title. That image is not uploaded. **Test connection** is separate and runs only when you click it.
+When AI mode is off, chat does not call the comment service. If offline mode is off and the PC is online, the app may request a short public Wikipedia summary for a game or a repeated name. Those calls send the name only, are cached locally, and stop when offline mode is on or the reachability check fails. **Test connection** is separate, runs only when you click it, and is skipped while the app is offline. Pressing backtick can still capture the screen on this PC so local chat can measure how much the picture changed, its main colors, and a window title. That image is not uploaded.
 
 ## What the app sends
 

@@ -1,7 +1,9 @@
 import { colorFor } from './color'
 import { BORED_LINES } from './crowd'
+import { badgeOf, pickCustom, viewerLine, type CustomViewer } from './custom-viewers'
 import { isKidSafe } from './filter'
 import { makeId } from './ids'
+import { nluLine, personalityFor, type Intent } from './nlu'
 import type { ScreenCue } from './screen-cues'
 import type { Badge, ChatMessage } from './types'
 import { makeUsername } from './usernames'
@@ -169,6 +171,13 @@ export interface LocalInput {
   boredom?: number
   roster?: LocalSpeaker[]
   now?: number
+  custom?: CustomViewer[]
+  randomNames?: string[]
+  intent?: Intent
+  focus?: string
+  joke?: string
+  fact?: string
+  knowledgeLine?: string
 }
 
 function pick<T>(items: readonly T[], rng: () => number): T {
@@ -333,6 +342,11 @@ function badgeFor(rng: () => number): Badge {
 }
 
 function speakerFor(input: LocalInput, used: Set<string>): LocalSpeaker {
+  const names = (input.randomNames ?? []).filter((name) => isKidSafe(name) && !used.has(name.toLowerCase()))
+  if (names.length && input.rng() < 0.55) {
+    const name = pick(names, input.rng)
+    return { name, badge: null, color: colorFor(name) }
+  }
   const roster = (input.roster ?? []).filter((person) => !used.has(person.name.toLowerCase()))
   if (roster.length && input.rng() < 0.8) return pick(roster, input.rng)
   const name = makeUsername(input.rng, new Set([...input.avoid, ...used]))
@@ -355,8 +369,32 @@ export function makeLocalMessages(input: LocalInput): ChatMessage[] {
   const now = input.now ?? Date.now()
   for (let i = 0; i < input.count; i++) {
     let text = ''
+    let speaker: LocalSpeaker | null = null
     const forceBored = (input.boredom ?? 0) > 0.72 && i === 0
-    for (let attempt = 0; attempt < 6; attempt++) {
+    if (!forceBored && input.custom?.length && input.rng() < 0.72) {
+      const person = pickCustom(input.custom, input.rng, usedNames)
+      if (person) {
+        speaker = { name: person.username, badge: badgeOf(person.role), color: person.color }
+        text = viewerLine(person, input.rng, keywords)
+      }
+    }
+    if (!text && !forceBored && input.intent && input.intent !== 'none' && input.rng() < 0.85) {
+      text = nluLine({
+        rng: input.rng,
+        intent: input.intent,
+        focus: input.focus,
+        keywords,
+        personality: speaker ? personalityFor(speaker.name, speaker.badge) : personalityFor('chat', null),
+        joke: input.joke,
+        fact: i === 0 ? input.fact : undefined,
+        knowledge: i === 1 ? input.knowledgeLine ?? undefined : undefined
+      })
+    }
+    if (!text && messages.length && !forceBored && input.rng() < 0.28) {
+      const previous = messages[messages.length - 1]
+      if (previous) text = `${previous.username} fr`
+    }
+    for (let attempt = 0; attempt < 6 && !text; attempt++) {
       const candidate = composeLocalLine({
         rng: input.rng,
         keywords,
@@ -372,7 +410,8 @@ export function makeLocalMessages(input: LocalInput): ChatMessage[] {
       break
     }
     if (!text) text = pick(SAFE_FALLBACK, input.rng)
-    const speaker = speakerFor(input, usedNames)
+    if (!usedText.has(text.toLowerCase())) usedText.add(text.toLowerCase())
+    if (!speaker) speaker = speakerFor(input, usedNames)
     usedNames.add(speaker.name.toLowerCase())
     input.avoid.add(speaker.name.toLowerCase())
     messages.push({

@@ -14,6 +14,18 @@ export function usageFile(): string {
   return join(app.getPath('userData'), 'usage.json')
 }
 
+export function voiceDebugFile(): string {
+  return join(app.getPath('userData'), 'voice-debug.log')
+}
+
+export function customViewersFile(): string {
+  return join(app.getPath('userData'), 'custom-viewers.json')
+}
+
+export function wikiCacheFile(): string {
+  return join(app.getPath('userData'), 'wiki-cache.json')
+}
+
 export function resourceDir(...parts: string[]): string {
   if (app.isPackaged) return join(process.resourcesPath, ...parts)
   return join(app.getAppPath(), 'resources', ...parts)

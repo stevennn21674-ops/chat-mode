@@ -23,7 +23,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   maxCallsPerHour: 20,
   model: DEFAULT_MODEL,
   baseUrl: DEFAULT_BASE_URL,
-  aiMode: false
+  aiMode: false,
+  showDebugTranscript: false,
+  offlineMode: false,
+  overlayMode: 'normal'
 }
 
 function finiteNumber(value: unknown): number | null {
@@ -113,6 +116,9 @@ export function applyPatch(current: AppSettings, patch: unknown): AppSettings {
 
   if (typeof raw.ecoMode === 'boolean') next.ecoMode = raw.ecoMode
   if (typeof raw.aiMode === 'boolean') next.aiMode = raw.aiMode
+  if (typeof raw.showDebugTranscript === 'boolean') next.showDebugTranscript = raw.showDebugTranscript
+  if (typeof raw.offlineMode === 'boolean') next.offlineMode = raw.offlineMode
+  if (raw.overlayMode === 'normal' || raw.overlayMode === 'game') next.overlayMode = raw.overlayMode
   const interval = finiteNumber(raw.captureIntervalSec)
   if (interval !== null) {
     next.captureIntervalSec = clamp(Math.round(interval), LIMITS.intervalMin, LIMITS.intervalMax)

@@ -91,8 +91,7 @@ export class OverlayController {
         backgroundThrottling: false
       }
     })
-    this.win.setAlwaysOnTop(true, 'screen-saver')
-    this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    this.pin()
     this.win.setContentProtection(true)
     this.win.setIgnoreMouseEvents(true, { forward: true })
     this.poll = setInterval(() => this.tickPointer(), 16)
@@ -123,6 +122,13 @@ export class OverlayController {
     if (gesture.moved && (gesture.kind === 'right' || gesture.kind === 'resize')) {
       this.onBounds(this.win.getBounds())
     }
+  }
+
+  pin(): void {
+    if (this.win.isDestroyed()) return
+    this.win.setAlwaysOnTop(true, 'screen-saver')
+    this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    this.win.moveTop()
   }
 
   setIgnore(ignore: boolean): void {

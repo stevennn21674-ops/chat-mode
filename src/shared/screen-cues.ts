@@ -36,6 +36,20 @@ function colorName(r: number, g: number, b: number): string {
   return light > 170 ? 'bright' : 'dark'
 }
 
+export function isMostlyBlack(bitmap: Uint8Array, threshold = 14): boolean {
+  if (bitmap.length < 16) return true
+  const pixels = Math.floor(bitmap.length / 4)
+  const step = Math.max(1, Math.floor(pixels / 500))
+  let sum = 0
+  let count = 0
+  for (let pixel = 0; pixel < pixels; pixel += step) {
+    const index = pixel * 4
+    sum += (bitmap[index] ?? 0) + (bitmap[index + 1] ?? 0) + (bitmap[index + 2] ?? 0)
+    count += 1
+  }
+  return count === 0 || sum / (count * 3) < threshold
+}
+
 export function dominantColorNames(bgra: Uint8Array): string[] {
   if (bgra.length < 4) return []
   const scores = new Map<string, number>()

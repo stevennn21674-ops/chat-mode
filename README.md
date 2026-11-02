@@ -28,19 +28,27 @@ The header shows an eye icon and a viewer count. It starts at a plausible number
 
 Simulated viewers each have an engagement level. A static screen, a long silence, or repetitive lines make them bored: chat slows down, some of them say things like `lol bored`, `gn`, or `brb`, and the count drops as they go. Talking, a backtick read, or a big screen change brings viewers back under new random usernames.
 
-Some viewers are moderators and show a green sword. Hold V and say `ban <name>`, `timeout <name>`, `mods ban him`, `mods ban that guy`, or `ban the spammer`. A mod answers in chat, that person's messages are removed, a `<name> has been banned` line appears, and the viewer count drops. The spoken name can be a little off. This stays on the PC and does not call the comment service.
+Some viewers are moderators and show a green sword. Hold V and say `ban <name>`, `timeout <name>`, `mods ban him`, `ban the last guy`, `ban the spammer`, or `ban everyone` / `ban all the bots`. A mod answers in chat, that person's messages are removed, a `<name> has been banned` line appears, the viewer count drops, and that viewer does not speak again. Names can be partial (`pixel` for `xX_PixelFox99`), missing a letter, or a whisper misspelling. This works with AI mode on or off and does not call the comment service. Settings has **Show debug transcript**, which prints the last heard line on the overlay. The same line and the parsed command are appended to `voice-debug.log` in the app data folder.
 
 ## Tray and settings
 
-The tray icon can show or hide the chat, turn screen reactions, voice, and AI mode on or off, pause capture, reset the chat to the right side of the screen, and open settings. Hover the icon to see whether a capture is in flight.
+The tray icon can show or hide the chat, turn screen reactions, voice, AI mode, and offline mode on or off, switch game mode, pause capture, reset the chat to the right side of the screen, and open settings. Hover the icon to see whether a capture is in flight. The tooltip adds **offline** when offline mode is on or the PC has no internet.
 
 Settings also covers the comment service, eco mode, **Hear computer audio**, the microphone, launch at startup, opacity, font size, and an optional relay. See [docs/SECURITY.md](docs/SECURITY.md).
 
-**Hear computer audio** is on by default. On Windows the app captures system audio with a desktop loopback, keeps about the last 18 seconds, and transcribes it on this PC with the same whisper.cpp pipeline as the microphone. Silence is skipped. The transcript is added as audio on the PC the next time you press the backtick key and when a voice call is sent. It does not make its own request. Turn it off in Settings if you do not want that sound included.
+**Hear computer audio** is on by default. On Windows the app captures system audio with a desktop loopback, keeps about the last 18 seconds, and transcribes it on this PC with the same whisper.cpp pipeline as the microphone. Silence is skipped. A pass runs about every 20 seconds, and again when you press backtick or finish talking, so chat can follow a game or a video. Whisper cannot tell speakers apart; the text is just what the PC played. The app keeps about 20 minutes of that, plus mic lines and window titles, and notes repeated names, places, and whether the moment sounds scared, like a fight, a win, or exploring. Turn it off in Settings if you do not want that sound included.
+
+**Offline mode** is off by default. When it is on, the app does not call the comment service or look anything up on the web. If the computer is simply offline, chat behaves the same way until a connection check succeeds, and the saved checkbox is left alone. The tray tooltip is the only offline indicator.
+
+With AI mode off and a connection available, a few names or game titles can be looked up on the public Wikipedia summary API. Results are cached on disk, limited to a few lookups a minute, and dropped if they are not kid-friendly. Failures are ignored. Slang stays the built-in list.
 
 ## Comment service and eco mode
 
-**AI mode** is a checkbox in Settings and a tray item. On uses the comment service below, with the key and model you set and the same eco limits as before. Off does not send any chat request: messages are built on this PC from a large local generator. That generator mixes reaction, emote, hype, question, joke, slang, fragment, caps, and typo lines, and it can combine word banks with words from your mic transcript, the computer-audio transcript, and other viewers. Echoed words go through the kid-friendly filter. A backtick capture is not sent to a vision model while AI mode is off. Local chat only sees cheap signals: how much the picture changed, the main colors, and the window title when the system provides one.
+**AI mode** is a checkbox in Settings and a tray item. On uses the comment service below, with the key and model you set and the same eco limits as before. The request also includes a short note of recent sounds, names, and what seems to be happening. That does not add another call. Off does not send any chat request: messages are built on this PC. The local chat tracks words from the mic, computer audio, and window titles, and it answers questions, greetings, scares, wins, and losses in different voices (hype, lurker, light troll, mod, backseat, questioner). Lines can quote you, misspell, stretch letters, or stack letters. Echoed words go through the kid-friendly filter. A backtick capture is not sent to a vision model while AI mode is off. Local chat only sees cheap signals: how much the picture changed, the main colors, and the window title when the system provides one.
+
+**Custom viewers** are edited in Settings, saved in the app data folder, and can be imported or exported as JSON. Each one has a role, color, a short personality, sliders, catchphrases, and topics. There is a hater preset and a list of extra random usernames. AI mode puts the active personalities in the prompt. With AI mode off, those sliders and phrases shape the lines. A custom moderator can be the one who answers a voice ban. Haters only tease lightly.
+
+**Game mode** is in Settings and the tray. Normal mode re-asserts the overlay every couple of seconds. Game mode does it every second at the topmost level so borderless fullscreen games, including Roblox and Escape the Backrooms, are more likely to stay underneath. A real exclusive-fullscreen DirectX game can still hide every overlay. Set the game to fullscreen windowed or borderless. In Roblox that is Shift+F11, or Esc then Settings, fullscreen. Roblox on Windows is usually borderless already. Backtick capture uses the primary display and, if that image is black, falls back to a window image.
 
 AI mode defaults to off when no API key is set, and on when a key is available. A choice you save is kept.
 
@@ -75,7 +83,7 @@ npm run dev
 
 You can type the key in Settings. Optionally copy `.env.example` to `.env` and set `AGNES_API_KEY` before `npm run dev` or `npm run build` if you want that key sealed into the app as a fallback. `.env` is gitignored and is not required.
 
-`npm test` covers the message parser, the slang prompt, the safety filter, speed steps, settings files, computer-audio silence, viewer count and boredom, mod commands, the offline generator, and a mocked comment service. `npm run typecheck` checks the TypeScript.
+`npm test` covers the message parser, the slang prompt, the safety filter, speed steps, settings files, computer-audio silence, viewer count and boredom, mod commands, the offline generator, local understanding, custom viewers, and a mocked comment service. `npm run typecheck` checks the TypeScript.
 
 Voice transcription needs the local speech binary and the tiny English model:
 
@@ -109,7 +117,9 @@ What you need to do:
 
 These were not verified on a real Windows desktop in this environment. The code is in place, and the logic around it is unit-tested, but you should confirm them on Windows:
 
-- Always-on-top behavior over fullscreen games and exclusive-fullscreen modes. Borderless windowed mode is the realistic case. Exclusive fullscreen often covers every overlay.
+- Always-on-top behavior over fullscreen games. Game mode re-asserts the topmost window every second, which is aimed at borderless fullscreen. Exclusive fullscreen can still cover any overlay.
+- Hold-V bans, the debug transcript line, custom viewers, Wikipedia lookups, and the offline tray tooltip on a real Windows desktop.
+- Screen capture while a game is exclusive fullscreen. A black screen image falls back to a window thumbnail. That fallback was not exercised on Windows here.
 - The global V hook (`uiohook-napi`), the backtick capture key, and the pause hotkey while a game is focused.
 - Microphone capture, device selection, and on-device transcription.
 - System-audio loopback (`getDisplayMedia` with `audio: 'loopback'`). It is a Windows feature. Silent audio is ignored before transcription.

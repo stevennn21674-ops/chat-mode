@@ -61,8 +61,8 @@ export const SLANG_TERMS = [
   'ohio'
 ] as const
 
-export function buildSystemPrompt(): string {
-  return [
+export function buildSystemPrompt(customBlock = ''): string {
+  const base = [
     'You write live chat messages for a kid-friendly fake livestream.',
     'Viewers are watching someone use their computer. They can see the screen the way a livestream audience would: the game, the menus, the windows, and whatever else is on the display. They react to that, and to what was just said, as if they are looking at it live.',
     'Viewers always behave as people who can see the screen. They never mention screenshots, screen captures, AI, a language model, or that anyone is feeding them images. They do not know those things exist.',
@@ -87,6 +87,8 @@ export function buildSystemPrompt(): string {
     'color must be a bright hex color that stays readable on a dark background.',
     'If the user asks for an exact count, return that many messages.'
   ].join('\n')
+  const extra = customBlock.trim()
+  return extra ? `${base}\n${extra}` : base
 }
 
 export function buildUserText(input: {
@@ -96,6 +98,7 @@ export function buildUserText(input: {
   batchCount: number
   hasImage: boolean
   pcAudio?: string[]
+  context?: string
 }): string {
   const speech = input.transcripts.length
     ? input.transcripts.map((line, index) => `${index + 1}. ${line}`).join('\n')
@@ -104,6 +107,7 @@ export function buildUserText(input: {
   const heard = heardLines.length ? heardLines.map((line, index) => `${index + 1}. ${line}`).join('\n') : '(nothing notable)'
   const recent = input.recentLines.length ? input.recentLines.slice(-8).join('\n') : '(no recent chat)'
   const avoid = input.avoidUsernames.slice(-40).join(', ') || '(none)'
+  const context = input.context?.trim() ? input.context.trim().slice(0, 420) : ''
   const sight = input.hasImage
     ? 'This is what is on the screen right now. React to the game, menu, or whatever is actually there, as a viewer who can see it.'
     : 'The screen was not included this time. React to what the streamer said, any audio on the PC, and the recent chat. Do not invent what is on the screen.'
@@ -117,6 +121,7 @@ export function buildUserText(input: {
     'Audio on the PC:',
     heard,
     '',
+    ...(context ? ['What has been happening, from sound and window titles:', context, ''] : []),
     'Recent chat already on screen:',
     recent,
     '',

@@ -38,6 +38,9 @@ export interface AppSettings {
   model: string
   baseUrl: string
   aiMode: boolean
+  showDebugTranscript: boolean
+  offlineMode: boolean
+  overlayMode: 'normal' | 'game'
 }
 
 export interface OverlayState {
@@ -50,6 +53,7 @@ export interface OverlayState {
   speedFlash: number
   micNote: string | null
   viewerCount: number
+  debugText: string | null
 }
 
 export interface MicDevice {
@@ -76,6 +80,7 @@ export interface SettingsView extends AppSettings {
   onBattery: boolean
   idle: boolean
   keySaved?: boolean
+  effectivelyOffline: boolean
 }
 
 export interface PointerEventPayload {

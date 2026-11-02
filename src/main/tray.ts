@@ -9,6 +9,8 @@ interface TrayHandlers {
   setScreen: (value: boolean) => void
   setVoice: (value: boolean) => void
   setAiMode: (value: boolean) => void
+  setOffline: (value: boolean) => void
+  setOverlayMode: (mode: 'normal' | 'game') => void
   setPaused: (value: boolean) => void
   openSettings: () => void
   resetPosition: () => void
@@ -46,6 +48,18 @@ export function createTray(handlers: TrayHandlers): { tray: Tray; render: () => 
           type: 'checkbox',
           checked: settings.aiMode,
           click: (item) => handlers.setAiMode(item.checked)
+        },
+        {
+          label: 'Offline mode',
+          type: 'checkbox',
+          checked: settings.offlineMode,
+          click: (item) => handlers.setOffline(item.checked)
+        },
+        {
+          label: 'Game mode (topmost)',
+          type: 'checkbox',
+          checked: settings.overlayMode === 'game',
+          click: (item) => handlers.setOverlayMode(item.checked ? 'game' : 'normal')
         },
         {
           label: 'Pause screen capture',

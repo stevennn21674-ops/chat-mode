@@ -1,6 +1,6 @@
 import { desktopCapturer, nativeImage, screen, type NativeImage } from 'electron'
 import { differenceHash } from '../shared/frame-diff'
-import { dominantColorNames } from '../shared/screen-cues'
+import { dominantColorNames, isMostlyBlack } from '../shared/screen-cues'
 
 export const DEMO_JPEG =
   '/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBxISEhUQEhIVFRUVFRUYFxUYFxcVFRgVFxUYHSggGBolGxUVITEhJSkrLi4uFx8zODMtNygtLisBCgoKDg0OGhAQGy0lHyUtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLf/AABEIAAMAAQMBIgACEQEDEQH/xAAbAAABBQEBAAAAAAAAAAAAAAADAAIEBQYBB//EABQBAQAAAAAAAAAAAAAAAAAAAAD/xAAVAQEBAAAAAAAAAAAAAAAAAAAAAf/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AJpA//9k='
@@ -55,6 +55,23 @@ async function foregroundTitle(): Promise<string | null> {
   return null
 }
 
+function frameFrom(image: NativeImage, title: string | null): CapturedFrame | null {
+  if (image.isEmpty()) return null
+  try {
+    if (isMostlyBlack(image.toBitmap())) return null
+  } catch {
+    return null
+  }
+  const jpeg = image.toJPEG(60)
+  const hashed = nativeImage.createFromBuffer(jpeg)
+  return {
+    jpegBase64: jpeg.toString('base64'),
+    hash: hashed.isEmpty() ? '' : hashImage(hashed),
+    colors: colorsOf(image),
+    title
+  }
+}
+
 export async function capturePrimaryJpeg(): Promise<CapturedFrame | null> {
   const display = screen.getPrimaryDisplay()
   const sourceWidth = Math.max(1, display.size.width)
@@ -70,15 +87,23 @@ export async function capturePrimaryJpeg(): Promise<CapturedFrame | null> {
     }),
     foregroundTitle()
   ])
-  if (sources.length === 0) return null
   const primary = sources.find((source) => source.display_id === String(display.id)) ?? sources[0]
-  if (primary.thumbnail.isEmpty()) return null
-  const jpeg = primary.thumbnail.toJPEG(60)
-  const hashed = nativeImage.createFromBuffer(jpeg)
-  return {
-    jpegBase64: jpeg.toString('base64'),
-    hash: hashed.isEmpty() ? '' : hashImage(hashed),
-    colors: colorsOf(primary.thumbnail),
-    title
+  const direct = primary ? frameFrom(primary.thumbnail, title) : null
+  if (direct) return direct
+  let windows: Awaited<ReturnType<typeof desktopCapturer.getSources>> = []
+  try {
+    windows = await desktopCapturer.getSources({
+      types: ['window'],
+      thumbnailSize: { width, height },
+      fetchWindowIcons: false
+    })
+  } catch {
+    return null
   }
+  for (const win of windows) {
+    if (/chat mode/i.test(win.name ?? '')) continue
+    const frame = frameFrom(win.thumbnail, title ?? win.name ?? null)
+    if (frame) return frame
+  }
+  return null
 }

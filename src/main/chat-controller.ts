@@ -4,18 +4,22 @@ import {
   banViewer,
   chatSlots,
   createCrowd,
+  isBanned,
   markTalking,
   noteChatLine,
   noteScreen,
   tickCrowd,
   type CrowdViewer
 } from '../shared/crowd'
+import { badgeOf, customPromptBlock, type CustomCrowd } from '../shared/custom-viewers'
 import { demoModelJson } from '../shared/demo'
 import { usableTranscript } from '../shared/speech'
 import { frameUnchanged } from '../shared/frame-diff'
 import { makeFallbackMessages } from '../shared/fallback'
 import { echoWords, makeLocalMessages } from '../shared/local-chat'
-import { buildModeration, parseModCommand, resolveModTarget, spamBump, speakerOf, withoutChatter, type Chatter } from '../shared/moderation'
+import { ingest, lookupCandidate, referenceLine, compactContext, createKnowledge, type Knowledge } from '../shared/knowledge'
+import { createMemory, detectIntent, noteText, recentTopics, type TermMemory } from '../shared/nlu'
+import { buildMassBan, buildModeration, formatModCommand, mergeChatters, parseModCommand, resolveModTargets, spamBump, speakerOf, withoutChatter, type Chatter, type ModCommand } from '../shared/moderation'
 import { produceReactions } from '../shared/pipeline'
 import { coverInterval, scheduleMessages, takeDue, type ScheduledMessage } from '../shared/schedule'
 import { canReachService, chatUsesService } from '../shared/settings'
@@ -33,11 +37,15 @@ interface ControllerDeps {
   sendMessage: (message: ChatMessage) => void
   config: () => ServiceConfig
   capture: () => Promise<{ jpegBase64: string; hash: string; colors?: string[]; title?: string | null } | null>
-  pcAudio: () => Promise<string>
+  pcAudio: () => Promise<{ text: string; loud: boolean }>
   usage: () => CallUsage
   setUsage: (usage: CallUsage) => void
   power: () => { idle: boolean; onBattery: boolean }
   log: (message: string) => void
+  logVoice?: (line: string) => void
+  offline?: () => boolean
+  customCrowd?: () => CustomCrowd
+  lookup?: (name: string) => Promise<string | null>
 }
 
 export class ChatController {
@@ -65,6 +73,13 @@ export class ChatController {
   private lastText = new Map<string, string>()
   private extraSpam = new Map<string, number>()
   private crowdAt = 0
+  private posters: Chatter[] = []
+  private memory: TermMemory = createMemory()
+  private knowledge: Knowledge = createKnowledge()
+  private lastHeard = ''
+  private loud = false
+  private facts = new Map<string, string>()
+  private looked = new Set<string>()
 
   constructor(private deps: ControllerDeps) {}
 
@@ -74,6 +89,7 @@ export class ChatController {
     this.timer = setInterval(() => {
       void this.tick()
     }, 250)
+    this.syncCustom()
     this.seed()
     this.publish()
   }
@@ -97,7 +113,8 @@ export class ChatController {
       capturePaused: settings.capturePaused,
       speedFlash: this.speedFlash,
       micNote: this.micNote,
-      viewerCount: this.crowd.count
+      viewerCount: this.crowd.count,
+      debugText: settings.showDebugTranscript ? this.lastHeard : null
     }
   }
 
@@ -121,20 +138,48 @@ export class ChatController {
   noteSpeech(text: string): void {
     const raw = text.trim().slice(0, 400)
     if (raw.length < 2) return
+    const now = Date.now()
+    this.lastHeard = raw.slice(0, 180)
+    noteText(this.memory, raw, now)
+    ingest(this.knowledge, raw, 'mic', now)
     const command = parseModCommand(raw)
+    this.deps.logVoice?.(`${raw} => ${command ? formatModCommand(command) : 'none'}`)
     if (command) {
       this.enforce(command)
       this.publish()
       return
     }
-    markTalking(this.crowd, Date.now())
+    markTalking(this.crowd, now)
     const clean = usableTranscript(raw)
     const remembered = clean || (!this.deps.getSettings().aiMode ? echoWords([raw]).join(' ') : '')
-    if (!remembered) return
-    this.transcripts.push(remembered)
-    if (this.transcripts.length > 4) this.transcripts.shift()
-    this.voicePending = true
+    if (remembered) {
+      this.transcripts.push(remembered)
+      if (this.transcripts.length > 4) this.transcripts.shift()
+      this.voicePending = true
+    }
+    void this.maybeLookup()
     this.publish()
+  }
+
+  async listenAmbient(): Promise<void> {
+    if (!this.alive || this.busy) return
+    const settings = this.deps.getSettings()
+    if (!settings.enabled || !settings.hearComputerAudio) return
+    this.busy = true
+    try {
+      const before = this.pcLines.at(-1) ?? ''
+      const heard = await this.heardAudio(settings)
+      if (!heard.length && !this.loud) return
+      if (heard[0] === before && !this.loud) return
+      const avoid = new Set(this.avoid.map((name) => name.toLowerCase()))
+      this.enqueue(this.localBatch(2, avoid, null))
+      void this.maybeLookup()
+      this.publish()
+    } catch {
+      this.deps.log('ambient audio failed')
+    } finally {
+      this.busy = false
+    }
   }
 
   requestScreen(): boolean {
@@ -181,20 +226,38 @@ export class ChatController {
   }
 
   private localBatch(count: number, avoid: Set<string>, screen: ScreenCue | null): ChatMessage[] {
+    this.syncCustom()
+    const custom = this.deps.customCrowd?.() ?? { viewers: [], randomNames: [] }
+    const heard = [this.lastHeard, this.pcLines.at(-1) ?? '', screen?.title ?? ''].filter(Boolean).join(' ')
+    const intent = detectIntent(heard, {
+      loud: this.loud,
+      names: [...this.crowd.viewers.map((viewer) => viewer.name), ...custom.viewers.map((viewer) => viewer.username)]
+    })
+    const guided = intent.intent === 'question' || intent.intent === 'ask-chat' ? Math.max(count, 3) : count
     return makeLocalMessages({
-      count,
+      count: guided,
       rng: Math.random,
       avoid,
-      transcripts: [...this.transcripts],
+      transcripts: [...this.transcripts, ...recentTopics(this.memory, Date.now()).slice(0, 6)],
       pcAudio: [...this.pcLines],
       recentLines: [...this.recentLines],
       screen,
       boredom: this.crowd.boredom,
-      roster: this.crowd.viewers.map((viewer) => ({
-        name: viewer.name,
-        badge: viewer.badge,
-        color: viewer.color
-      }))
+      roster: this.crowd.viewers
+        .filter((viewer) => !isBanned(this.crowd, viewer.name))
+        .map((viewer) => ({
+          name: viewer.name,
+          badge: viewer.badge,
+          color: viewer.color
+        })),
+      custom: custom.viewers.filter((viewer) => viewer.active && !isBanned(this.crowd, viewer.username)),
+      randomNames: custom.randomNames,
+      intent: intent.intent,
+      focus: intent.focus,
+      joke: this.memory.joke,
+      fact: [...this.facts.values()].at(-1),
+      knowledgeLine: referenceLine(this.knowledge, Math.random) ?? undefined,
+      now: Date.now()
     })
   }
 
@@ -209,15 +272,31 @@ export class ChatController {
   }
 
   private commit(message: ChatMessage): void {
+    if (message.kind === 'chat' && isBanned(this.crowd, message.username)) return
     if (message.kind === 'chat') {
       this.avoid.push(message.username)
       if (this.avoid.length > 40) this.avoid.shift()
       this.recentLines.push(`${message.username}: ${message.text}`)
       if (this.recentLines.length > 8) this.recentLines.shift()
       this.rememberSpam(message)
+      this.rememberPoster(message)
       noteChatLine(this.crowd, message.text)
     }
     this.deps.sendMessage(message)
+  }
+
+  private rememberPoster(message: ChatMessage): void {
+    const key = message.username.toLowerCase()
+    const viewer = this.crowd.viewers.find((item) => item.name.toLowerCase() === key)
+    this.posters = this.posters.filter((poster) => poster.name.toLowerCase() !== key)
+    this.posters.push({
+      name: message.username,
+      spam: Math.max(viewer?.spam ?? 0, this.extraSpam.get(key) ?? 0),
+      recentIndex: this.posters.length,
+      mod: message.badge === 'mod' || viewer?.badge === 'mod'
+    })
+    if (this.posters.length > 40) this.posters.shift()
+    this.posters = this.posters.map((poster, index) => ({ ...poster, recentIndex: index }))
   }
 
   private rememberSpam(message: ChatMessage): void {
@@ -231,21 +310,71 @@ export class ChatController {
   }
 
   private chatters(): Chatter[] {
-    return this.recentLines.map((line, index) => {
-      const name = speakerOf(line)
-      const key = name.toLowerCase()
-      const viewer = this.crowd.viewers.find((item) => item.name.toLowerCase() === key)
-      return {
-        name,
-        spam: Math.max(viewer?.spam ?? 0, this.extraSpam.get(key) ?? 0),
-        recentIndex: index,
-        mod: viewer?.badge === 'mod'
+    const custom = this.deps.customCrowd?.().viewers ?? []
+    return mergeChatters([
+      this.posters,
+      this.recentLines.map((line, index) => {
+        const name = speakerOf(line)
+        const key = name.toLowerCase()
+        const viewer = this.crowd.viewers.find((item) => item.name.toLowerCase() === key)
+        return {
+          name,
+          spam: Math.max(viewer?.spam ?? 0, this.extraSpam.get(key) ?? 0),
+          recentIndex: index,
+          mod: viewer?.badge === 'mod'
+        }
+      }),
+      this.crowd.viewers.map((viewer) => ({
+        name: viewer.name,
+        spam: viewer.spam,
+        recentIndex: -1,
+        mod: viewer.badge === 'mod'
+      })),
+      custom.filter((viewer) => viewer.active).map((viewer) => ({
+        name: viewer.username,
+        spam: 0,
+        recentIndex: -1,
+        mod: viewer.role === 'mod'
+      }))
+    ])
+  }
+
+  private syncCustom(): void {
+    const custom = this.deps.customCrowd?.().viewers ?? []
+    for (const viewer of custom) {
+      if (!viewer.active || isBanned(this.crowd, viewer.username)) continue
+      const key = viewer.username.toLowerCase()
+      const existing = this.crowd.viewers.find((item) => item.name.toLowerCase() === key)
+      const badge = badgeOf(viewer.role)
+      if (existing) {
+        existing.badge = badge
+        existing.color = viewer.color
+        continue
       }
-    }).filter((chatter) => chatter.name.length > 0)
+      if (this.crowd.viewers.length >= 22) {
+        const drop = this.crowd.viewers.find((item) => item.badge !== 'mod' && !custom.some((person) => person.username.toLowerCase() === item.name.toLowerCase()))
+        if (drop) this.crowd.viewers = this.crowd.viewers.filter((item) => item !== drop)
+      }
+      this.crowd.viewers.push({
+        name: viewer.username,
+        badge,
+        color: viewer.color,
+        engagement: viewer.presence / 100,
+        spam: 0
+      })
+    }
   }
 
   private modSpeaker(except?: string | null): CrowdViewer {
+    this.syncCustom()
     const skip = except?.toLowerCase() ?? ''
+    const customMod = (this.deps.customCrowd?.().viewers ?? []).find(
+      (viewer) => viewer.active && viewer.role === 'mod' && viewer.username.toLowerCase() !== skip && !isBanned(this.crowd, viewer.username)
+    )
+    if (customMod) {
+      const found = this.crowd.viewers.find((viewer) => viewer.name.toLowerCase() === customMod.username.toLowerCase())
+      if (found) return found
+    }
     const mods = this.crowd.viewers.filter((viewer) => viewer.badge === 'mod' && viewer.name.toLowerCase() !== skip)
     if (mods.length) return mods[Math.floor(Math.random() * mods.length)] ?? mods[0]
     const avoid = new Set(this.crowd.viewers.map((viewer) => viewer.name.toLowerCase()))
@@ -255,27 +384,27 @@ export class ChatController {
     return viewer
   }
 
-  private enforce(command: ReturnType<typeof parseModCommand>): void {
+  private enforce(command: ModCommand | null): void {
     if (!command) return
-    const target = resolveModTarget(command, this.chatters())
-    const mod = this.modSpeaker(target)
-    if (target) {
+    this.syncCustom()
+    let targets = resolveModTargets(command, this.chatters())
+    if (command.target === 'everyone' && targets.length === 0) {
+      targets = this.crowd.viewers.filter((viewer) => viewer.badge !== 'mod').map((viewer) => viewer.name).slice(0, 12)
+    }
+    const mod = this.modSpeaker(targets[0] ?? null)
+    for (const target of targets) {
       const key = target.toLowerCase()
       this.pending = this.pending.filter((item) => item.message.username.toLowerCase() !== key)
       this.recentLines = withoutChatter(this.recentLines, target)
+      this.posters = this.posters.filter((poster) => poster.name.toLowerCase() !== key)
       this.extraSpam.delete(key)
       this.lastText.delete(key)
       banViewer(this.crowd, target)
     }
-    for (const message of buildModeration({
-      target,
-      modName: mod.name,
-      modColor: mod.color,
-      rng: Math.random,
-      now: Date.now()
-    })) {
-      this.commit(message)
-    }
+    const built = targets.length > 1
+      ? buildMassBan({ targets, modName: mod.name, modColor: mod.color, rng: Math.random, now: Date.now() })
+      : buildModeration({ target: targets[0] ?? null, modName: mod.name, modColor: mod.color, rng: Math.random, now: Date.now() })
+    for (const message of built) this.commit(message)
   }
 
   private flush(): void {
@@ -283,6 +412,7 @@ export class ChatController {
     const { next, rest } = takeDue(this.pending, Date.now())
     this.pending = rest
     if (!next) return
+    if (next.message.kind === 'chat' && isBanned(this.crowd, next.message.username)) return
     this.commit(next.message)
   }
 
@@ -326,7 +456,7 @@ export class ChatController {
     if (!wantVoice && !wantCapture) return
     this.voicePending = false
     this.capturePending = false
-    if (!chatUsesService(settings.aiMode, process.env.CHATMODE_DEMO === '1')) {
+    if (this.deps.offline?.() || !chatUsesService(settings.aiMode, process.env.CHATMODE_DEMO === '1')) {
       await this.runLocal(wantVoice, wantCapture)
       return
     }
@@ -349,13 +479,42 @@ export class ChatController {
 
   private async heardAudio(settings: AppSettings): Promise<string[]> {
     if (!settings.hearComputerAudio) return []
-    const raw = await this.deps.pcAudio()
+    const clip = await this.deps.pcAudio()
+    this.loud = clip.loud
+    const raw = clip.text.trim().slice(0, 400)
+    if (raw && raw === this.pcLines.at(-1) && !clip.loud) return []
+    const now = Date.now()
+    if (raw) {
+      noteText(this.memory, raw, now)
+      ingest(this.knowledge, raw, 'pc', now)
+      this.lastHeard = raw.slice(0, 180)
+    }
     const heard = usableTranscript(raw)
-    const local = !chatUsesService(settings.aiMode, process.env.CHATMODE_DEMO === '1')
+    const local = this.deps.offline?.() || !chatUsesService(settings.aiMode, process.env.CHATMODE_DEMO === '1')
     const text = heard || (local ? echoWords([raw]).join(' ') : '')
     if (!text) return []
     this.rememberPc(text)
     return [text]
+  }
+
+  private noteTitle(title: string | null | undefined): void {
+    if (!title) return
+    const now = Date.now()
+    noteText(this.memory, title, now)
+    ingest(this.knowledge, title, 'title', now)
+  }
+
+  private async maybeLookup(): Promise<void> {
+    if (this.deps.getSettings().aiMode || this.deps.offline?.()) return
+    const name = lookupCandidate(this.knowledge, this.looked)
+    if (!name) return
+    this.looked.add(name.toLowerCase())
+    try {
+      const fact = await this.deps.lookup?.(name)
+      if (fact) this.facts.set(name.toLowerCase(), fact)
+    } catch {
+      // Lookups are optional.
+    }
   }
 
   private async runLocal(voice: boolean, captureNow: boolean): Promise<void> {
@@ -373,6 +532,8 @@ export class ChatController {
           this.lastHash = frame.hash || this.lastHash
           signal = { change, colors: frame.colors ?? [], title: frame.title ?? null }
           noteScreen(this.crowd, change, Date.now())
+          this.noteTitle(signal.title)
+          void this.maybeLookup()
         }
       }
       if (settings.hearComputerAudio && (voice || signal)) {
@@ -414,6 +575,7 @@ export class ChatController {
           changed = !frameUnchanged(this.lastHash, frame.hash, settings.ecoMode ? 8 : 4)
           this.lastHash = frame.hash || this.lastHash
           noteScreen(this.crowd, amount, Date.now())
+          this.noteTitle(frame.title)
           if (changed) image = frame.jpegBase64
         }
       }
@@ -451,6 +613,8 @@ export class ChatController {
           pcAudio,
           recentLines: [...this.recentLines],
           avoidUsernames: [...this.avoid],
+          context: compactContext(this.knowledge, Date.now()),
+          customBlock: customPromptBlock(this.deps.customCrowd?.().viewers ?? [], this.deps.customCrowd?.().randomNames ?? []),
           speedLevel: settings.speedLevel,
           now: Date.now(),
           batchCount: plan.count,

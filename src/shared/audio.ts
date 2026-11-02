@@ -18,6 +18,12 @@ export function isSilentPcm(samples: Float32Array, threshold = SILENCE_RMS): boo
   return pcmRms(samples) < threshold
 }
 
+export const LOUD_RMS = 0.12
+
+export function isLoudPcm(samples: Float32Array, threshold = LOUD_RMS): boolean {
+  return samples.length > 0 && pcmRms(samples) >= threshold
+}
+
 export class PcmWindow {
   private chunks: Float32Array[] = []
   private sampleRate = 0

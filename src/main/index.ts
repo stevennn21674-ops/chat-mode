@@ -1,7 +1,9 @@
-import { app, BrowserWindow, Menu, desktopCapturer, globalShortcut, ipcMain, powerMonitor, session, screen } from 'electron'
+import { app, BrowserWindow, Menu, desktopCapturer, dialog, globalShortcut, ipcMain, net, powerMonitor, session, screen, type OpenDialogOptions, type SaveDialogOptions } from 'electron'
 import type { Input } from 'electron'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { callsInWindow } from '../shared/budget'
+import { allowLookup, fetchWikiFact } from '../shared/lookup'
+import { effectivelyOffline } from '../shared/net'
 import { aiModeSpecified, canReachService, defaultAiMode, usableProxyUrl } from '../shared/settings'
 import { startupStateReady } from '../shared/startup'
 import { readSettingsFile } from '../shared/settings-file'
@@ -11,11 +13,12 @@ import { ChatController } from './chat-controller'
 import { capturePrimaryJpeg, DEMO_JPEG } from './capture'
 import { testService } from './connection-test'
 import { CredentialStore } from './credential-store'
-import { log } from './logger'
+import { log, logVoiceDebug, setVoiceDebugFile } from './logger'
 import { LoopbackController } from './loopback'
 import { loadPage, OverlayController, placeOverlay, preloadPath } from './overlay'
 import { defaultPlacement, initialSize } from '../shared/placement'
-import { credentialsFile, resourceDir, settingsFile, usageFile, whisperLocation } from './paths'
+import { CustomStore } from './custom-store'
+import { credentialsFile, customViewersFile, resourceDir, settingsFile, usageFile, voiceDebugFile, wikiCacheFile, whisperLocation } from './paths'
 import { getServiceConfig } from './service-config'
 import { SettingsStore } from './store'
 import { asFloat32, TalkController } from './talk'
@@ -113,6 +116,7 @@ async function bootstrap(): Promise<void> {
       .catch(() => callback(null))
   }, { useSystemPicker: false })
 
+  setVoiceDebugFile(voiceDebugFile())
   const settingsPath = settingsFile()
   const specifiedAiMode = aiModeSpecified(readRawSettings(settingsPath))
   const store = new SettingsStore(settingsPath, readSettingsFile(settingsPath))
@@ -122,6 +126,10 @@ async function bootstrap(): Promise<void> {
     store.settings.aiMode = defaultAiMode(hasKey, null)
   }
   const usage = new UsageStore(usageFile())
+  const customs = new CustomStore(customViewersFile())
+  const wikiStamps: number[] = []
+  const wikiCache = loadWikiCache(wikiCacheFile())
+  let reachable = true
   applyLogin(store.settings.launchAtStartup)
 
   const activeConfig = (): ReturnType<typeof resolveService> => {
@@ -187,7 +195,11 @@ async function bootstrap(): Promise<void> {
     usage: () => usage.usage,
     setUsage: (next) => usage.replace(next),
     power: powerState,
-    log
+    log,
+    logVoice: logVoiceDebug,
+    offline: () => effectivelyOffline(store.settings.offlineMode, reachable),
+    customCrowd: () => customs.crowd,
+    lookup: (name) => lookupName(name)
   })
 
   const overlay = new OverlayController(
@@ -228,6 +240,15 @@ async function bootstrap(): Promise<void> {
     },
     setAiMode: (value) => {
       store.update({ aiMode: value })
+      refresh()
+    },
+    setOffline: (value) => {
+      store.update({ offlineMode: value })
+      refresh()
+    },
+    setOverlayMode: (mode) => {
+      store.update({ overlayMode: mode })
+      overlay.pin()
       refresh()
     },
     setPaused: (value) => controller.setCapturePaused(value),
@@ -278,16 +299,53 @@ async function bootstrap(): Promise<void> {
       encryptionAvailable: credentials.encryptionAvailable(),
       callsThisHour: callsInWindow(usage.usage, Date.now()),
       onBattery: power.onBattery,
-      idle: power.idle
+      idle: power.idle,
+      effectivelyOffline: effectivelyOffline(store.settings.offlineMode, reachable)
     }
   }
 
   function statusText(): string {
-    if (!store.settings.enabled) return 'Chat Mode is hidden'
-    if (store.settings.capturePaused) return 'Chat Mode — capture paused'
-    if (Date.now() < captureHintUntil) return 'Chat Mode — reading the screen'
-    if (controller.snapshot().analyzing) return 'Chat Mode — screen is being analyzed'
-    return 'Chat Mode'
+    const offline = effectivelyOffline(store.settings.offlineMode, reachable) ? ' — offline' : ''
+    if (!store.settings.enabled) return `Chat Mode is hidden${offline}`
+    if (store.settings.capturePaused) return `Chat Mode — capture paused${offline}`
+    if (Date.now() < captureHintUntil) return `Chat Mode — reading the screen${offline}`
+    if (controller.snapshot().analyzing) return `Chat Mode — screen is being analyzed${offline}`
+    return `Chat Mode${offline}`
+  }
+
+  async function lookupName(name: string): Promise<string | null> {
+    if (effectivelyOffline(store.settings.offlineMode, reachable)) return null
+    const key = name.toLowerCase()
+    const cached = wikiCache[key]
+    if (cached) return cached
+    if (!allowLookup(wikiStamps, Date.now())) return null
+    const fact = await fetchWikiFact(name, fetch)
+    if (!fact) return null
+    wikiCache[key] = fact
+    saveWikiCache(wikiCacheFile(), wikiCache)
+    return fact
+  }
+
+  async function probe(): Promise<void> {
+    let online = true
+    try {
+      online = net.isOnline()
+    } catch {
+      online = true
+    }
+    if (!online) {
+      reachable = false
+      tray.tray.setToolTip(statusText())
+      return
+    }
+    if (store.settings.offlineMode) return
+    try {
+      const response = await fetch('https://example.com/', { method: 'GET', signal: AbortSignal.timeout(3000) })
+      reachable = response.ok || response.status < 500
+    } catch {
+      reachable = false
+    }
+    tray.tray.setToolTip(statusText())
   }
 
   function applyVisibility(): void {
@@ -364,6 +422,9 @@ async function bootstrap(): Promise<void> {
     return { ...view(true), keySaved: saved }
   })
   ipcMain.handle('settings:test', async (_event, draft: unknown) => {
+    if (effectivelyOffline(store.settings.offlineMode, reachable)) {
+      return { ok: false, detail: 'Offline, so the connection was not tested.' }
+    }
     const record = draft && typeof draft === 'object' ? (draft as Record<string, unknown>) : {}
     const typedKey = typeof record.apiKey === 'string' ? record.apiKey : ''
     const resolved = activeConfig()
@@ -390,6 +451,34 @@ async function bootstrap(): Promise<void> {
     return view()
   })
   ipcMain.handle('settings:mics', () => listMics(voice))
+  ipcMain.handle('custom:get', () => customs.crowd)
+  ipcMain.handle('custom:set', (_event, raw: unknown) => customs.replace(raw))
+  ipcMain.handle('custom:export', async () => {
+    const parent = settingsWindow && !settingsWindow.isDestroyed() ? settingsWindow : undefined
+    const options: SaveDialogOptions = {
+      defaultPath: 'chat-mode-viewers.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    }
+    const result = parent ? await dialog.showSaveDialog(parent, options) : await dialog.showSaveDialog(options)
+    if (result.canceled || !result.filePath) return false
+    writeFileSync(result.filePath, customs.serialize())
+    return true
+  })
+  ipcMain.handle('custom:import', async () => {
+    const parent = settingsWindow && !settingsWindow.isDestroyed() ? settingsWindow : undefined
+    const options: OpenDialogOptions = {
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      properties: ['openFile']
+    }
+    const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options)
+    const file = result.filePaths[0]
+    if (result.canceled || !file) return customs.crowd
+    try {
+      return customs.replace(JSON.parse(readFileSync(file, 'utf8')) as unknown)
+    } catch {
+      return customs.crowd
+    }
+  })
   ipcMain.on('voice:audio', (_event, payload: unknown) => {
     const record = payload as { sampleRate?: unknown; pcm?: unknown }
     const pcm = asFloat32(record?.pcm)
@@ -431,12 +520,26 @@ async function bootstrap(): Promise<void> {
   controller.start(publish)
   refresh()
   if (process.env.CHATMODE_SETTINGS === '1') openSettings()
+  const pin = (): void => overlay.pin()
+  screen.on('display-added', pin)
+  screen.on('display-removed', pin)
+  screen.on('display-metrics-changed', pin)
+  overlay.win.on('blur', pin)
+  app.on('browser-window-focus', pin)
+  let pinTick = 0
   setInterval(() => {
-    if (!overlay.win.isDestroyed() && overlay.win.isVisible() && !overlay.win.isAlwaysOnTop()) {
-      overlay.win.setAlwaysOnTop(true, 'screen-saver')
-    }
+    pinTick += 1
+    const game = store.settings.overlayMode === 'game'
+    if (!overlay.win.isDestroyed() && overlay.win.isVisible() && (game || pinTick % 2 === 0)) overlay.pin()
     tray.tray.setToolTip(statusText())
-  }, 2000)
+  }, 1000)
+  setInterval(() => {
+    void controller.listenAmbient()
+  }, 22000)
+  void probe()
+  setInterval(() => {
+    void probe()
+  }, 45000)
 
   app.on('before-quit', () => {
     quitting = true
@@ -448,6 +551,30 @@ async function bootstrap(): Promise<void> {
   app.on('window-all-closed', () => {
     // The tray keeps the process alive.
   })
+}
+
+function loadWikiCache(file: string): Record<string, string> {
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const out: Record<string, string> = {}
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === 'string' && value.length < 240) out[key.slice(0, 80).toLowerCase()] = value
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function saveWikiCache(file: string, cache: Record<string, string>): void {
+  try {
+    const tmp = `${file}.tmp`
+    writeFileSync(tmp, JSON.stringify(cache))
+    renameSync(tmp, file)
+  } catch {
+    // Cache misses are fine.
+  }
 }
 
 function readRawSettings(file: string): unknown {

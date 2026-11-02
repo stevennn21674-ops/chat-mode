@@ -37,6 +37,7 @@ export interface Crowd {
   lastScreenChange: number
   recentTexts: string[]
   repetitive: number
+  banned: string[]
 }
 
 export interface CrowdTick {
@@ -93,7 +94,8 @@ export function createCrowd(rng: () => number, now: number): Crowd {
     lastScreenAt: now,
     lastScreenChange: 0.35,
     recentTexts: [],
-    repetitive: 0
+    repetitive: 0,
+    banned: []
   }
 }
 
@@ -149,8 +151,13 @@ export function noteScreen(crowd: Crowd, change: number, now: number): void {
   if (change < 0.1) crowd.boredom = Math.min(1, crowd.boredom + 0.05)
 }
 
+export function isBanned(crowd: Crowd, name: string): boolean {
+  return crowd.banned.includes(name.toLowerCase())
+}
+
 export function banViewer(crowd: Crowd, name: string): void {
   const key = name.toLowerCase()
+  if (!crowd.banned.includes(key)) crowd.banned.push(key)
   const index = crowd.viewers.findIndex((viewer) => viewer.name.toLowerCase() === key)
   if (index >= 0) crowd.viewers.splice(index, 1)
   crowd.count = Math.max(1, crowd.count - 1)
@@ -177,8 +184,9 @@ export function tickCrowd(crowd: Crowd, input: CrowdTick): CrowdEvent[] {
 
   const active = input.micLive || silent < 12_000 || (crowd.lastScreenChange >= 0.45 && sinceScreen < 15_000)
   if (active && crowd.viewers.length < 18 && input.rng() < 0.45) {
-    const avoid = new Set(crowd.viewers.map((viewer) => viewer.name.toLowerCase()))
+    const avoid = new Set([...crowd.viewers.map((viewer) => viewer.name.toLowerCase()), ...crowd.banned])
     const name = makeUsername(input.rng, avoid)
+    if (!isBanned(crowd, name)) {
     const roll = input.rng()
     const badge: Badge = roll < 0.08 ? 'mod' : roll < 0.18 ? 'vip' : roll < 0.32 ? 'sub' : null
     const viewer: CrowdViewer = {
@@ -191,6 +199,7 @@ export function tickCrowd(crowd: Crowd, input: CrowdTick): CrowdEvent[] {
     crowd.viewers.push(viewer)
     crowd.count = Math.min(99_999, crowd.count + 1 + Math.floor(input.rng() * 3))
     events.push({ type: 'join', name, badge, color: viewer.color })
+    }
   }
 
   if (crowd.boredom > 0.6 && crowd.viewers.length > 4 && input.rng() < 0.55) {

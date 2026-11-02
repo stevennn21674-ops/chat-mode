@@ -22,6 +22,11 @@
         <label class="switch"><input id="voice" type="checkbox" /> Voice reactions</label>
         <label class="switch"><input id="pc-audio" type="checkbox" /> Hear computer audio</label>
         <label class="switch"><input id="startup" type="checkbox" /> Launch at startup</label>
+        <label class="switch"><input id="offline" type="checkbox" /> Offline mode</label>
+        <label class="switch"><input id="debug-transcript" type="checkbox" /> Show debug transcript</label>
+        <label class="switch"><input id="game-mode" type="checkbox" /> Game mode (re-assert topmost every 1s)</label>
+        <p class="hint">Offline mode blocks the comment service and web lookups. If the PC has no internet, chat stays offline until the connection returns. Game mode keeps the overlay above borderless fullscreen. A true exclusive fullscreen game can still cover it: use borderless or windowed fullscreen (Roblox is usually borderless; Shift+F11 or Esc, Settings, fullscreen).</p>
+        <p id="offline-note" class="hint"></p>
       </section>
 
       <section class="card">
@@ -82,7 +87,57 @@
           <button id="reset" type="button">Reset position</button>
         </div>
         <p id="status" class="status"></p>
-        <p class="hint">Press ` to send the screen. Pause from anywhere with Ctrl+Shift+F8. Hold V to talk.</p>
+        <p class="hint">Press ` to send the screen. Pause from anywhere with Ctrl+Shift+F8. Hold V and say ban, timeout, ban him, the last guy, the spammer, or everyone.</p>
+      </section>
+
+      <section class="card">
+        <h2>Custom viewers</h2>
+        <p class="hint">Saved on this PC. Mods can answer ban commands. Haters stay light. AI mode uses the description; offline chat uses the sliders and catchphrases.</p>
+        <div id="custom-list"></div>
+        <div class="actions">
+          <button id="custom-add" type="button">Add viewer</button>
+          <button id="custom-haters" type="button">Add hater preset</button>
+        </div>
+        <div id="custom-form" class="hidden">
+          <label>Username <input id="cv-name" type="text" maxlength="18" spellcheck="false" /></label>
+          <label>Role
+            <select id="cv-role">
+              <option value="viewer">Regular viewer</option>
+              <option value="mod">Moderator</option>
+              <option value="hater">Hater</option>
+              <option value="hyper">Random / hyper</option>
+              <option value="lurker">Lurker</option>
+              <option value="backseat">Backseat gamer</option>
+              <option value="vip">VIP</option>
+              <option value="sub">Sub</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <label>Color <input id="cv-color" type="text" maxlength="7" spellcheck="false" /></label>
+          <label class="switch"><input id="cv-active" type="checkbox" /> Active</label>
+          <label>Personality <textarea id="cv-desc" rows="2" maxlength="200"></textarea></label>
+          <label>Talkativeness <input id="cv-talk" type="range" min="0" max="100" /></label>
+          <label>Positivity <input id="cv-pos" type="range" min="0" max="100" /></label>
+          <label>Hype <input id="cv-hype" type="range" min="0" max="100" /></label>
+          <label>Trolling (light) <input id="cv-troll" type="range" min="0" max="100" /></label>
+          <label>How often they appear <input id="cv-presence" type="range" min="0" max="100" /></label>
+          <label>Emoji <input id="cv-emoji" type="range" min="0" max="100" /></label>
+          <label>Caps <input id="cv-caps" type="range" min="0" max="100" /></label>
+          <label>Slang <input id="cv-slang" type="range" min="0" max="100" /></label>
+          <label>Catchphrases <input id="cv-phrases" type="text" spellcheck="false" /></label>
+          <label>Topics <input id="cv-topics" type="text" spellcheck="false" /></label>
+          <div class="actions">
+            <button id="custom-save" type="button">Save viewer</button>
+            <button id="custom-delete" type="button">Delete</button>
+          </div>
+        </div>
+        <label>Random people
+          <textarea id="random-names" rows="3" spellcheck="false" placeholder="one username per line"></textarea>
+        </label>
+        <div class="actions">
+          <button id="custom-export" type="button">Export JSON</button>
+          <button id="custom-import" type="button">Import JSON</button>
+        </div>
       </section>
 
       <details class="card">

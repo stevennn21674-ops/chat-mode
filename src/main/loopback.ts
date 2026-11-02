@@ -3,7 +3,7 @@ import { unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ipcMain, type BrowserWindow } from 'electron'
-import { downsample, encodeWavPcm16, isSilentPcm } from '../shared/audio'
+import { downsample, encodeWavPcm16, isLoudPcm, isSilentPcm } from '../shared/audio'
 import { whisperLocation } from './paths'
 import { asFloat32 } from './talk'
 import { transcribeFile } from './transcribe'
@@ -22,21 +22,22 @@ export class LoopbackController {
     this.voice.webContents.send('voice:command', { type: on ? 'loopback-start' : 'loopback-stop' })
   }
 
-  async transcript(): Promise<string> {
-    if (!this.enabled || this.voice.isDestroyed()) return ''
+  async transcript(): Promise<{ text: string; loud: boolean }> {
+    if (!this.enabled || this.voice.isDestroyed()) return { text: '', loud: false }
     const clip = await this.take()
-    if (!clip) return ''
+    if (!clip) return { text: '', loud: false }
     const samples = downsample(clip.pcm, clip.sampleRate, 16000)
-    if (samples.length < 8000 || isSilentPcm(samples)) return ''
+    const loud = isLoudPcm(samples)
+    if (samples.length < 8000 || isSilentPcm(samples)) return { text: '', loud: false }
     const where = whisperLocation()
-    if (!where) return ''
+    if (!where) return { text: '', loud }
     const wavPath = join(tmpdir(), `chatmode-pc-${randomUUID()}.wav`)
     try {
       writeFileSync(wavPath, encodeWavPcm16(samples, 16000))
-      return await transcribeFile(where.bin, where.model, wavPath)
+      return { text: await transcribeFile(where.bin, where.model, wavPath), loud }
     } catch {
       this.log('computer audio transcription failed')
-      return ''
+      return { text: '', loud }
     } finally {
       try {
         unlinkSync(wavPath)

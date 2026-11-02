@@ -70,7 +70,7 @@ input[type='checkbox'] {
 
 input[type='range'] { width: 100%; accent-color: #6d5efc; }
 
-input[type='url'], input[type='password'], select {
+input[type='url'], input[type='password'], input[type='text'], textarea, select {
   width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: #101218;
@@ -101,7 +101,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
   outline-offset: 2px;
 }
 
-#reset { background: #2a2f3d; }
+#reset, #custom-delete, #custom-haters, #custom-export { background: #2a2f3d; }
+textarea { resize: vertical; }
+.viewer-row { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin: 4px 0; }
+.viewer-row button { background: #2a2f3d; padding: 4px 8px; }
 
 ul { list-style: none; margin: 0; padding: 0; }
 li {
