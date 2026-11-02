@@ -44,7 +44,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: resources/brain
-          key: brain-qwen25-0.5b-q8-4a774f86-llama-b12032-${{ runner.os }}-x64
+          key: brain-qwen25-0.5b-q8-ca59ca7f-llama-b12032-${{ runner.os }}-x64
 
       - name: Download the bundled local model
         run: node scripts/fetch-brain.mjs
