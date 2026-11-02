@@ -10,6 +10,10 @@ export function credentialsFile(): string {
   return join(app.getPath('userData'), 'credentials.bin')
 }
 
+export function youtubeKeyFile(): string {
+  return join(app.getPath('userData'), 'youtube-key.bin')
+}
+
 export function usageFile(): string {
   return join(app.getPath('userData'), 'usage.json')
 }

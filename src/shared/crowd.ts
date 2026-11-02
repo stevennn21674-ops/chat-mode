@@ -132,6 +132,14 @@ export function noteChatLine(crowd: Crowd, text: string): void {
   crowd.repetitive = 1 - unique / crowd.recentTexts.length
 }
 
+export function bumpViewers(crowd: Crowd, amount: number, now: number): void {
+  const gain = Math.max(0, Math.round(amount))
+  if (!gain) return
+  crowd.count = Math.min(99_999, crowd.count + gain)
+  crowd.boredom = Math.max(0, crowd.boredom - 0.12)
+  crowd.lastSpeechAt = now
+}
+
 export function markTalking(crowd: Crowd, now: number): void {
   crowd.lastSpeechAt = now
   crowd.boredom = Math.max(0, crowd.boredom - 0.2)

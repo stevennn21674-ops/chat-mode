@@ -5,6 +5,7 @@
 body {
   margin: 0;
   min-height: 100%;
+  overflow-y: auto;
   background: #101218;
   color: #f4f6fb;
   font-family: "Segoe UI", Candara, "Trebuchet MS", sans-serif;

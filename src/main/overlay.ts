@@ -3,7 +3,17 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { clampPlacement, defaultPlacement, initialSize, type Rect } from '../shared/placement'
-import { LIMITS, type PointerEventPayload } from '../shared/types'
+import {
+  finishGesture,
+  hitZone,
+  ignoreNeedsApply,
+  moveGesture,
+  startGesture,
+  wantsIgnore,
+  type ClickButton,
+  type Gesture
+} from '../shared/pointer'
+import type { PointerEventPayload } from '../shared/types'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 
@@ -45,19 +55,13 @@ export function displayRects(): Rect[] {
   return [primary.workArea, ...others.map((display) => display.workArea)]
 }
 
-interface Gesture {
-  kind: 'left' | 'right' | 'resize'
-  sx: number
-  sy: number
-  bounds: Rectangle
-  moved: boolean
-}
-
 export class OverlayController {
   readonly win: BrowserWindow
   private ignoring = true
   private gesture: Gesture | null = null
   private poll: NodeJS.Timeout
+  private mouseResetTicks = 0
+  private locked = false
 
   constructor(
     bounds: Rectangle,
@@ -93,47 +97,85 @@ export class OverlayController {
     })
     this.pin()
     this.win.setContentProtection(true)
-    this.win.setIgnoreMouseEvents(true, { forward: true })
     this.poll = setInterval(() => this.tickPointer(), 16)
     this.win.on('closed', () => clearInterval(this.poll))
   }
 
+  setLocked(locked: boolean): void {
+    this.locked = locked
+  }
+
   pointer(payload: PointerEventPayload): void {
     if (payload.type === 'down') {
+      if (this.gesture) return
       const cursor = screen.getCursorScreenPoint()
-      this.gesture = {
-        kind: payload.mode === 'resize' ? 'resize' : payload.button,
-        sx: cursor.x,
-        sy: cursor.y,
-        bounds: this.win.getBounds(),
-        moved: false
-      }
+      const bounds = this.win.getBounds()
+      const zone = payload.mode === 'resize' ? 'resize' : hitZone(cursor, bounds)
+      const gesture = startGesture(zone === 'outside' ? 'chat' : zone, payload.button, cursor, bounds)
+      if (!gesture) return
+      this.gesture = gesture
+      this.mouseResetTicks = 4
+      this.syncIgnore()
       return
     }
     this.endGesture()
+  }
+
+  mouseDown(button: ClickButton): void {
+    if (this.gesture || this.win.isDestroyed() || !this.win.isVisible()) return
+    const cursor = screen.getCursorScreenPoint()
+    const bounds = this.win.getBounds()
+    const gesture = startGesture(hitZone(cursor, bounds), button, cursor, bounds)
+    if (!gesture) return
+    this.gesture = gesture
+    this.mouseResetTicks = 4
+    this.syncIgnore()
   }
 
   endGesture(): void {
     const gesture = this.gesture
     if (!gesture) return
     this.gesture = null
-    if (!gesture.moved && gesture.kind === 'left') this.onSpeed('slower')
-    if (!gesture.moved && gesture.kind === 'right') this.onSpeed('faster')
-    if (gesture.moved && (gesture.kind === 'right' || gesture.kind === 'resize')) {
-      this.onBounds(this.win.getBounds())
-    }
+    const result = finishGesture(gesture, this.locked)
+    if (result.speed) this.onSpeed(result.speed)
+    if (result.save) this.onBounds(this.win.getBounds())
+    this.syncIgnore()
   }
 
   pin(): void {
     if (this.win.isDestroyed()) return
+    const bounds = this.win.getBounds()
     this.win.setAlwaysOnTop(true, 'screen-saver')
-    this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-    this.win.moveTop()
+    if (!this.gesture) {
+      this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+      this.win.moveTop()
+    } else {
+      this.win.setBounds(bounds)
+    }
+    // Re-asserting topmost clears WS_EX_TRANSPARENT on Windows. Write the
+    // click-through flag again or the chat stops receiving clicks.
+    this.mouseResetTicks = 8
+    this.syncIgnore()
   }
 
   setIgnore(ignore: boolean): void {
     if (this.gesture) return
-    if (ignore === this.ignoring) return
+    const want = wantsIgnore(this.zone(), false)
+    if (ignore !== want) return
+    this.syncIgnore()
+  }
+
+  private zone() {
+    if (this.win.isDestroyed() || !this.win.isVisible()) return 'outside' as const
+    return hitZone(screen.getCursorScreenPoint(), this.win.getBounds())
+  }
+
+  private syncIgnore(): void {
+    if (this.win.isDestroyed()) return
+    const ignore = wantsIgnore(this.zone(), Boolean(this.gesture))
+    const force = this.mouseResetTicks > 0
+    if (this.mouseResetTicks > 0) this.mouseResetTicks -= 1
+    if (!ignoreNeedsApply(this.ignoring, ignore, force)) return
     this.ignoring = ignore
     this.win.setIgnoreMouseEvents(ignore, { forward: true })
   }
@@ -145,38 +187,16 @@ export class OverlayController {
       return
     }
     if (!this.win.isVisible()) return
-    const cursor = screen.getCursorScreenPoint()
-    const bounds = this.win.getBounds()
-    const inset = 12
-    const over =
-      cursor.x >= bounds.x + inset &&
-      cursor.y >= bounds.y + inset &&
-      cursor.x <= bounds.x + bounds.width - inset &&
-      cursor.y <= bounds.y + bounds.height - inset
-    this.setIgnore(!over)
+    this.syncIgnore()
   }
 
   private drag(): void {
     const gesture = this.gesture
     if (!gesture) return
-    const cursor = screen.getCursorScreenPoint()
-    const dx = cursor.x - gesture.sx
-    const dy = cursor.y - gesture.sy
-    if (Math.abs(dx) + Math.abs(dy) > 5) gesture.moved = true
-    if (!gesture.moved) return
-    if (gesture.kind === 'right') {
-      this.win.setPosition(gesture.bounds.x + dx, gesture.bounds.y + dy)
-      return
-    }
-    if (gesture.kind === 'resize') {
-      this.win.setSize(
-        clamp(gesture.bounds.width + dx, LIMITS.widthMin, LIMITS.widthMax),
-        clamp(gesture.bounds.height + dy, LIMITS.heightMin, LIMITS.heightMax)
-      )
-    }
+    const stepped = moveGesture(gesture, screen.getCursorScreenPoint(), this.locked)
+    this.gesture = stepped.gesture
+    if (!stepped.bounds) return
+    if (gesture.kind === 'right') this.win.setPosition(stepped.bounds.x, stepped.bounds.y)
+    else if (gesture.kind === 'resize') this.win.setSize(stepped.bounds.width, stepped.bounds.height)
   }
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, Math.round(value)))
 }

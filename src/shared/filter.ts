@@ -147,3 +147,22 @@ export function isKidSafe(input: string): boolean {
   }
   return true
 }
+
+export function maskBadWords(input: string): string {
+  let text = ` ${input} `
+  for (const phrase of PHRASES) text = text.replace(phrase, ' **** ')
+  for (const word of BLOCKED_WORDS) {
+    text = text.replace(new RegExp(`\\b${word}\\b`, 'ig'), '****')
+  }
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+export function displayChatText(input: string, hideBadWords: boolean): string | null {
+  const trimmed = input.replace(/\s+/g, ' ').trim().slice(0, 220)
+  if (!trimmed) return null
+  if (!hideBadWords) return trimmed
+  const masked = maskBadWords(trimmed)
+  if (!masked || /^[\s*]+$/.test(masked)) return null
+  if (!isKidSafe(masked)) return null
+  return masked
+}

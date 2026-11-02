@@ -4,7 +4,7 @@ import { detectIntent, ENTITIES, GAMES, knownTopic, PLACES } from './nlu'
 export interface HeardLine {
   at: number
   text: string
-  source: 'mic' | 'pc' | 'title'
+  source: 'mic' | 'pc' | 'title' | 'chat' | 'screen'
 }
 
 export interface Entity {

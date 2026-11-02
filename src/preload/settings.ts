@@ -39,6 +39,9 @@ contextBridge.exposeInMainWorld('settings', {
   deleteBrain(): Promise<SettingsView> {
     return ipcRenderer.invoke('brain:delete')
   },
+  testAlert(): Promise<boolean> {
+    return ipcRenderer.invoke('alerts:test')
+  },
   onChange(callback: (view: SettingsView) => void): () => void {
     const listener = (_event: unknown, view: SettingsView): void => callback(view)
     ipcRenderer.on('settings:changed', listener)

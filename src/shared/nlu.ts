@@ -73,26 +73,6 @@ const SCARE_LINES = ['LETS GOOO', 'NOOO', 'RUN', 'BEHIND YOU']
 const WIN_LINES = ['GG', 'W', 'LETS GOOO', 'huge']
 const LOSE_LINES = ['GG', 'F', 'RIP', 'L']
 const GREET_LINES = ['hey hey', 'hellooo', 'yo welcome', 'hi hi', 'heyy']
-const ANSWERS = [
-  'I think {word}',
-  'maybe {word}?',
-  'no clue but {word}',
-  'probably {word}',
-  'chat says {word}',
-  'my guess is {word}',
-  'wait is it {word}',
-  'could be {word}'
-]
-const ASK_LINES = [
-  'I would pick {word}',
-  'do {word}',
-  'skip {word}',
-  'go for {word}',
-  'not {word}',
-  'yes {word}',
-  'nah try {word}',
-  '{word} for sure'
-]
 const ADVICE = [
   'check the corner',
   'save first',
@@ -175,6 +155,17 @@ function hasWord(text: string, words: readonly string[]): string {
   return words.find((word) => keys.has(word)) ?? ''
 }
 
+const FOCUS_SKIP = new Set([...STOP, ...QUESTION_WORDS, 'chat', 'should', 'would', 'could', 'please', 'do', 'did', 'does'])
+
+export function contentFocus(text: string): string {
+  const words = text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((word) => word.length > 1 && !FOCUS_SKIP.has(word))
+  return words.slice(-3).join(' ').slice(0, 48)
+}
+
 export function detectIntent(text: string, opts?: { loud?: boolean; names?: string[] }): IntentHit {
   const clean = text.toLowerCase().replace(/[^a-z0-9\s']/g, ' ').replace(/\s+/g, ' ').trim()
   const scare = hasWord(clean, SCARE_WORDS)
@@ -185,9 +176,13 @@ export function detectIntent(text: string, opts?: { loud?: boolean; names?: stri
   if (won) return { intent: 'win', focus: won }
   if (/^(hi|hey|hello|yo|sup|howdy|hiya|heya)\b/.test(clean)) return { intent: 'greeting', focus: clean.split(' ')[0] ?? 'hi' }
   const asking = /\bchat\b/.test(clean) && (clean.includes('?') || QUESTION_WORDS.some((word) => clean.split(' ').includes(word)) || /\b(should|do you|what do)\b/.test(clean))
-  if (asking) return { intent: 'ask-chat', focus: hasWord(clean, [...GAMES, ...ENTITIES, ...PLACES]) || 'that' }
+  if (asking) {
+    const known = hasWord(clean, [...GAMES, ...ENTITIES, ...PLACES])
+    return { intent: 'ask-chat', focus: known || contentFocus(clean) || 'that' }
+  }
   if (clean.includes('?') || QUESTION_WORDS.some((word) => clean.startsWith(`${word} `) || clean.split(' ').includes(word))) {
-    return { intent: 'question', focus: hasWord(clean, [...GAMES, ...ENTITIES, ...PLACES, ...EMOTIONS]) || 'that' }
+    const known = hasWord(clean, [...GAMES, ...ENTITIES, ...PLACES, ...EMOTIONS])
+    return { intent: 'question', focus: known || contentFocus(clean) || 'that' }
   }
   const named = (opts?.names ?? []).find((name) => {
     const key = name.toLowerCase().replace(/[^a-z0-9]/g, '')
@@ -257,10 +252,6 @@ function pick(lines: readonly string[], rng: () => number): string {
   return lines[Math.min(lines.length - 1, Math.floor(rng() * lines.length))] ?? lines[0] ?? 'nice'
 }
 
-function fill(template: string, word: string): string {
-  return template.replaceAll('{word}', word || 'that')
-}
-
 export function nluLine(input: {
   rng: () => number
   intent: Intent
@@ -281,8 +272,19 @@ export function nluLine(input: {
   else if (input.intent === 'win') line = pick(WIN_LINES, rng)
   else if (input.intent === 'lose') line = pick(LOSE_LINES, rng)
   else if (input.intent === 'greeting') line = pick(GREET_LINES, rng)
-  else if (input.intent === 'ask-chat') line = fill(pick(ASK_LINES, rng), safeWord)
-  else if (input.intent === 'question') line = fill(pick(ANSWERS, rng), safeWord)
+  else if (input.intent === 'ask-chat') {
+    const focus = input.focus && input.focus !== 'that' ? input.focus : safeWord !== 'that' ? safeWord : ''
+    const lines = focus
+      ? [`I would ${focus}`, `go for ${focus}`, `chat says ${focus}`, `yeah ${focus}`]
+      : ['I would wait', 'go slow', 'trust it', 'one more try']
+    line = pick(lines, rng)
+  }
+  else if (input.intent === 'question') {
+    const focus = input.focus && input.focus !== 'that' ? input.focus : safeWord
+    const games = new Set(['Roblox', 'Minecraft', 'Fortnite', 'FNF', 'Escape the Backrooms'])
+    if (games.has(focus)) line = `this is ${focus}`
+    else line = pick([`I think ${focus}`, `maybe ${focus}`, `check ${focus}`, `${focus}??`], rng)
+  }
   else if (input.intent === 'name' && input.focus && isKidSafe(input.focus)) line = pick([`yo ${input.focus}`, `${input.focus} fr`, `${input.focus} you saw that`], rng)
   else if (input.intent === 'compliment') line = pick(['so true', 'W', 'they are goated', 'love that'], rng)
   else if (input.intent === 'insult') line = pick(['that was mid', 'skill issue but kind', 'not the play', 'hmm sure'], rng)
@@ -294,7 +296,8 @@ export function nluLine(input: {
 
   const style = rng()
   const shout = input.intent === 'scare' || input.intent === 'win' || input.intent === 'lose' || input.intent === 'greeting'
-  if (input.personality === 'hyper' || (!shout && style < 0.18)) {
+  const literal = input.intent === 'question' || input.intent === 'ask-chat' || input.intent === 'name'
+  if (!literal && (input.personality === 'hyper' || (!shout && style < 0.18))) {
     if (style < 0.06) line = stretchWord(line.split(' ')[0] || line)
     else if (style < 0.1) line = letterSpam(safeWord)
     else if (style < 0.14) line = columnWord(safeWord)
@@ -305,4 +308,48 @@ export function nluLine(input: {
   if (input.personality === 'mod') line = `chat ${line}`.slice(0, 160)
   const clipped = line.replace(/\s+/g, ' ').trim().slice(0, 180)
   return clipped && isKidSafe(clipped) ? clipped : 'nice'
+}
+
+export function jokeLine(joke: string): string {
+  const word = joke.replace(/[^a-z0-9]/gi, '').slice(0, 24)
+  if (!word || !isKidSafe(word)) return ''
+  return `the ${word} arc continues`
+}
+
+export function replyToViewer(line: string, rng: () => number): string | null {
+  const split = line.indexOf(':')
+  const name = split >= 0 ? line.slice(0, split).trim() : ''
+  const text = (split >= 0 ? line.slice(split + 1) : line).trim()
+  if (!text || !isKidSafe(text) || (name && !isKidSafe(name))) return null
+  const intent = detectIntent(text)
+  if (intent.intent === 'question' || intent.intent === 'ask-chat' || text.includes('?')) {
+    const focus = intent.focus && intent.focus !== 'that' ? intent.focus : contentFocus(text)
+    const answer = focus ? `I think ${focus}` : 'not sure'
+    return (name ? `${name} ${answer}` : answer).slice(0, 160)
+  }
+  if (name && rng() < 0.7) return `${name} fr`
+  return null
+}
+
+export function offlineReply(
+  text: string,
+  opts?: { game?: string | null; names?: string[]; joke?: string; recent?: string }
+): string {
+  if (opts?.game && /\bgame\b/i.test(text) && /\b(what|which|this)\b/i.test(text)) return `this is ${opts.game}`
+  const intent = detectIntent(text, { names: opts?.names })
+  if (intent.intent === 'none' && opts?.recent) {
+    const reply = replyToViewer(opts.recent, () => 0)
+    if (reply) return reply
+  }
+  if (intent.intent === 'none' && opts?.joke) {
+    const joke = jokeLine(opts.joke)
+    if (joke) return joke
+  }
+  return nluLine({
+    rng: () => 0,
+    intent: intent.intent,
+    focus: intent.focus,
+    keywords: intent.focus ? [intent.focus] : [],
+    joke: opts?.joke
+  })
 }

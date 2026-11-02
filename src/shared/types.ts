@@ -1,7 +1,10 @@
 export type Badge = 'mod' | 'sub' | 'vip' | null
 export type BrainSpeed = 'light' | 'normal' | 'heavy'
-export type BrainSize = 'small' | 'medium'
-export type MessageKind = 'chat' | 'donation' | 'sub' | 'raid' | 'hype' | 'system'
+export type BrainSize = 'small' | 'medium' | 'smart'
+export type MessageKind = 'chat' | 'donation' | 'sub' | 'bits' | 'gift' | 'raid' | 'hype' | 'system'
+export type AlertFrequency = 'rare' | 'normal' | 'often'
+export type SoundPack = 'coin' | 'chime' | 'arcade' | 'horn'
+export type ChatMix = 'real' | 'mixed'
 
 export interface ChatMessage {
   id: string
@@ -46,6 +49,34 @@ export interface AppSettings {
   localBrain: boolean
   brainSpeed: BrainSpeed
   brainSize: BrainSize
+  lockPosition: boolean
+  alertsEnabled: boolean
+  alertVolume: number
+  alertFrequency: AlertFrequency
+  alertMin: number
+  alertMax: number
+  alertCurrency: string
+  alertSound: SoundPack
+  alertTts: boolean
+  twitchChannel: string
+  youtubeLive: string
+  chatMix: ChatMix
+  hideBadWords: boolean
+  liveLink: boolean
+  screenWatch: boolean
+  autoVision: boolean
+  autoVisionPerHour: number
+  pauseWatchOnBattery: boolean
+}
+
+export interface AlertBanner {
+  kind: MessageKind
+  username: string
+  amount: string
+  text: string
+  sound: SoundPack
+  volume: number
+  speak: string | null
 }
 
 export interface OverlayState {
@@ -92,6 +123,9 @@ export interface SettingsView extends AppSettings {
   localBrainProgress: number | null
   localBrainNote: string
   localBrainButton: string
+  youtubeApiKey: string
+  hasYoutubeKey: boolean
+  liveStatus: string
 }
 
 export interface PointerEventPayload {
@@ -114,7 +148,11 @@ export const LIMITS = {
   intervalMin: 15,
   intervalMax: 120,
   callsMin: 4,
-  callsMax: 120
+  callsMax: 120,
+  alertMin: 1,
+  alertMax: 500,
+  autoVisionMin: 1,
+  autoVisionMax: 12
 } as const
 
 export const PAUSE_HOTKEY = 'Ctrl+Shift+F8'

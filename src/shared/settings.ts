@@ -29,7 +29,25 @@ export const DEFAULT_SETTINGS: AppSettings = {
   overlayMode: 'normal',
   localBrain: true,
   brainSpeed: 'normal',
-  brainSize: 'medium'
+  brainSize: 'medium',
+  lockPosition: false,
+  alertsEnabled: true,
+  alertVolume: 0.8,
+  alertFrequency: 'normal',
+  alertMin: 2,
+  alertMax: 50,
+  alertCurrency: '$',
+  alertSound: 'coin',
+  alertTts: false,
+  twitchChannel: '',
+  youtubeLive: '',
+  chatMix: 'mixed',
+  hideBadWords: true,
+  liveLink: false,
+  screenWatch: true,
+  autoVision: false,
+  autoVisionPerHour: 6,
+  pauseWatchOnBattery: true
 }
 
 function finiteNumber(value: unknown): number | null {
@@ -124,7 +142,44 @@ export function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   if (raw.overlayMode === 'normal' || raw.overlayMode === 'game') next.overlayMode = raw.overlayMode
   if (typeof raw.localBrain === 'boolean') next.localBrain = raw.localBrain
   if (raw.brainSpeed === 'light' || raw.brainSpeed === 'normal' || raw.brainSpeed === 'heavy') next.brainSpeed = raw.brainSpeed
-  if (raw.brainSize === 'small' || raw.brainSize === 'medium') next.brainSize = raw.brainSize
+  if (raw.brainSize === 'small' || raw.brainSize === 'medium' || raw.brainSize === 'smart') next.brainSize = raw.brainSize
+  if (typeof raw.lockPosition === 'boolean') next.lockPosition = raw.lockPosition
+  if (typeof raw.alertsEnabled === 'boolean') next.alertsEnabled = raw.alertsEnabled
+  if (typeof raw.alertTts === 'boolean') next.alertTts = raw.alertTts
+  if (typeof raw.hideBadWords === 'boolean') next.hideBadWords = raw.hideBadWords
+  if (typeof raw.liveLink === 'boolean') next.liveLink = raw.liveLink
+  if (typeof raw.screenWatch === 'boolean') next.screenWatch = raw.screenWatch
+  if (typeof raw.autoVision === 'boolean') next.autoVision = raw.autoVision
+  if (typeof raw.pauseWatchOnBattery === 'boolean') next.pauseWatchOnBattery = raw.pauseWatchOnBattery
+  if (raw.alertFrequency === 'rare' || raw.alertFrequency === 'normal' || raw.alertFrequency === 'often') {
+    next.alertFrequency = raw.alertFrequency
+  }
+  if (raw.alertSound === 'coin' || raw.alertSound === 'chime' || raw.alertSound === 'arcade' || raw.alertSound === 'horn') {
+    next.alertSound = raw.alertSound
+  }
+  if (raw.chatMix === 'real' || raw.chatMix === 'mixed') next.chatMix = raw.chatMix
+  const volume = finiteNumber(raw.alertVolume)
+  if (volume !== null) next.alertVolume = clamp(volume, 0, 1)
+  const alertMin = finiteNumber(raw.alertMin)
+  const alertMax = finiteNumber(raw.alertMax)
+  if (alertMin !== null) next.alertMin = clamp(Math.round(alertMin), LIMITS.alertMin, LIMITS.alertMax)
+  if (alertMax !== null) next.alertMax = clamp(Math.round(alertMax), LIMITS.alertMin, LIMITS.alertMax)
+  if (next.alertMin > next.alertMax) {
+    const swap = next.alertMin
+    next.alertMin = next.alertMax
+    next.alertMax = swap
+  }
+  if (typeof raw.alertCurrency === 'string') {
+    const currency = raw.alertCurrency.replace(/[^\w$€£¥]/g, '').slice(0, 4)
+    if (currency) next.alertCurrency = currency
+  }
+  if (typeof raw.twitchChannel === 'string') {
+    const channel = raw.twitchChannel.trim().replace(/^#/, '').toLowerCase()
+    next.twitchChannel = /^[a-z0-9_]{2,25}$/.test(channel) ? channel : ''
+  }
+  if (typeof raw.youtubeLive === 'string') next.youtubeLive = raw.youtubeLive.trim().slice(0, 200)
+  const visionCap = finiteNumber(raw.autoVisionPerHour)
+  if (visionCap !== null) next.autoVisionPerHour = clamp(Math.round(visionCap), LIMITS.autoVisionMin, LIMITS.autoVisionMax)
   const interval = finiteNumber(raw.captureIntervalSec)
   if (interval !== null) {
     next.captureIntervalSec = clamp(Math.round(interval), LIMITS.intervalMin, LIMITS.intervalMax)

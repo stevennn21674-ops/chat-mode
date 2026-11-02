@@ -75,7 +75,9 @@ function parseBadge(value: unknown): Badge {
 function parseKind(value: unknown): MessageKind {
   if (typeof value !== 'string') return 'chat'
   const kind = value.toLowerCase().trim()
-  if (kind === 'donation' || kind === 'donate' || kind === 'bits') return 'donation'
+  if (kind === 'donation' || kind === 'donate' || kind === 'superchat') return 'donation'
+  if (kind === 'bits' || kind === 'cheer') return 'bits'
+  if (kind === 'gift' || kind === 'subgift') return 'gift'
   if (kind === 'sub' || kind === 'subscription') return 'sub'
   if (kind === 'raid') return 'raid'
   if (kind === 'hype' || kind === 'hypetrain' || kind === 'hype_train') return 'hype'

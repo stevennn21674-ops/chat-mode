@@ -72,6 +72,27 @@ function frameFrom(image: NativeImage, title: string | null): CapturedFrame | nu
   }
 }
 
+export async function captureWatchFrame(): Promise<{ bgra: Uint8Array; title: string | null } | null> {
+  const display = screen.getPrimaryDisplay()
+  const [sources, title] = await Promise.all([
+    desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: 64, height: 36 },
+      fetchWindowIcons: false
+    }),
+    foregroundTitle()
+  ])
+  const primary = sources.find((source) => source.display_id === String(display.id)) ?? sources[0]
+  if (!primary || primary.thumbnail.isEmpty()) return null
+  try {
+    const bgra = primary.thumbnail.toBitmap()
+    if (bgra.length < 64) return null
+    return { bgra, title }
+  } catch {
+    return null
+  }
+}
+
 export async function capturePrimaryJpeg(): Promise<CapturedFrame | null> {
   const display = screen.getPrimaryDisplay()
   const sourceWidth = Math.max(1, display.size.width)

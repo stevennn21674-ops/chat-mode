@@ -1,7 +1,9 @@
+import { alertIntervalMs, alertReaction, allowSyntheticChat, rollAlert, sampleDonation, speechLine, type AlertDraft } from '../shared/alerts'
 import { requestCompletion } from '../shared/ai-client'
 import { batchPlan, nextWaitMs, recordCall, shouldCallModel, underCallCap, type CallUsage } from '../shared/budget'
 import {
   banViewer,
+  bumpViewers,
   chatSlots,
   createCrowd,
   isBanned,
@@ -13,10 +15,13 @@ import {
 } from '../shared/crowd'
 import { badgeOf, customPromptBlock, type CustomCrowd } from '../shared/custom-viewers'
 import { demoModelJson } from '../shared/demo'
+import { displayChatText, isKidSafe } from '../shared/filter'
+import type { LiveItem } from '../shared/live'
+import { activityLines, allowAutoVision, type ActivityEvent } from '../shared/screen-activity'
 import { usableTranscript } from '../shared/speech'
 import { frameUnchanged } from '../shared/frame-diff'
 import { makeFallbackMessages } from '../shared/fallback'
-import { brainDecision, paceFor, type BrainTurn } from '../shared/brain'
+import { brainDecision, paceFor, polishBrainLines, type BrainTurn } from '../shared/brain'
 import { echoWords, makeLocalMessages } from '../shared/local-chat'
 import { ingest, lookupCandidate, referenceLine, compactContext, createKnowledge, type Knowledge } from '../shared/knowledge'
 import { createMemory, detectIntent, noteText, recentTopics, type TermMemory } from '../shared/nlu'
@@ -26,7 +31,7 @@ import { coverInterval, scheduleMessages, takeDue, type ScheduledMessage } from 
 import { canReachService, chatUsesService } from '../shared/settings'
 import { screenChange, type ScreenCue } from '../shared/screen-cues'
 import { stepSpeed } from '../shared/speed'
-import type { AppSettings, ChatMessage, OverlayState } from '../shared/types'
+import type { AlertBanner, AppSettings, ChatMessage, OverlayState } from '../shared/types'
 import { makeUsername } from '../shared/usernames'
 import { colorFor } from '../shared/color'
 import { nextBackoff } from '../shared/urls'
@@ -52,6 +57,8 @@ interface ControllerDeps {
     cpu: () => number | null
     generate: (turn: BrainTurn) => Promise<ChatMessage[] | null>
   }
+  sendAlert?: (alert: AlertBanner) => void
+  liveLines?: () => string[]
 }
 
 export class ChatController {
@@ -89,6 +96,10 @@ export class ChatController {
   private brainAt = 0
   private brainBusy = false
   private windowTitle = ''
+  private activity: ActivityEvent | null = null
+  private nextAlertAt = 0
+  private liveActive = false
+  private autoShots: number[] = []
 
   constructor(private deps: ControllerDeps) {}
 
@@ -100,6 +111,7 @@ export class ChatController {
     }, 250)
     this.syncCustom()
     this.seed()
+    this.nextAlertAt = Date.now() + 8000
     this.publish()
   }
 
@@ -200,6 +212,152 @@ export class ChatController {
     return true
   }
 
+  setLiveActive(active: boolean): void {
+    this.liveActive = active
+  }
+
+  noteActivity(event: ActivityEvent): void {
+    this.activity = event
+    const now = event.at || Date.now()
+    noteText(this.memory, event.detail, now)
+    ingest(this.knowledge, event.detail, 'screen', now)
+    if (event.game) noteText(this.memory, event.game, now)
+    if (this.deps.getSettings().enabled) {
+      const text = activityLines(event.state, event.game)[0]
+      const speaker = this.crowd.viewers.find((viewer) => !isBanned(this.crowd, viewer.name))
+      if (text && speaker) {
+        this.enqueue([
+          {
+            id: `act-${now}`,
+            username: speaker.name,
+            badge: speaker.badge,
+            color: speaker.color,
+            text,
+            kind: 'chat'
+          }
+        ])
+      }
+    }
+    if (event.big && this.allowFake()) this.requestAutoVision()
+    this.publish()
+  }
+
+  acceptLive(item: LiveItem): void {
+    const settings = this.deps.getSettings()
+    if (!settings.enabled) return
+    const text = displayChatText(item.message.text, settings.hideBadWords)
+    const username = displayChatText(item.message.username, settings.hideBadWords) ?? 'viewer'
+    if (!text) return
+    const message: ChatMessage = { ...item.message, text, username }
+    const now = Date.now()
+    noteText(this.memory, `${username} ${text}`, now)
+    ingest(this.knowledge, `${username}: ${text}`, 'chat', now)
+    if (item.alert) {
+      this.showAlert(
+        {
+          message,
+          reactions: [],
+          viewerBump: item.bump,
+          sound: settings.alertSound,
+          speak: speechLine(message, settings.alertTts)
+        },
+        true
+      )
+      const speaker = this.crowd.viewers.find((viewer) => !isBanned(this.crowd, viewer.name))
+      const text = alertReaction(message.kind, Math.random)
+      if (speaker && text) {
+        this.enqueue([
+          {
+            id: `live-react-${now}`,
+            username: speaker.name,
+            badge: speaker.badge,
+            color: speaker.color,
+            text,
+            kind: 'chat'
+          }
+        ])
+      }
+      return
+    }
+    this.recentLines.push(`${username}: ${text}`)
+    if (this.recentLines.length > 8) this.recentLines.shift()
+    this.commit(message)
+  }
+
+  testDonation(): void {
+    const settings = this.deps.getSettings()
+    this.showAlert(sampleDonation(settings.alertCurrency, settings.alertSound, settings.alertTts), true)
+  }
+
+  private allowFake(): boolean {
+    return allowSyntheticChat(this.deps.getSettings().chatMix, this.liveActive)
+  }
+
+  private isAlert(kind: ChatMessage['kind']): boolean {
+    return kind === 'donation' || kind === 'sub' || kind === 'bits' || kind === 'gift' || kind === 'raid'
+  }
+
+  private allowedBlob(): string {
+    return [...this.transcripts, ...this.pcLines, this.windowTitle, this.activity?.detail ?? '', this.activity?.game ?? '', ...this.recentLines, this.memory.joke].join(' ')
+  }
+
+  private requestAutoVision(): void {
+    const settings = this.deps.getSettings()
+    const now = Date.now()
+    this.autoShots = this.autoShots.filter((stamp) => now - stamp < 3_600_000)
+    if (!allowAutoVision({
+      aiMode: settings.aiMode,
+      autoVision: settings.autoVision,
+      offline: this.deps.offline?.() ?? false,
+      big: true,
+      usedThisHour: this.autoShots.length,
+      cap: settings.autoVisionPerHour
+    })) return
+    this.autoShots.push(now)
+    this.capturePending = true
+  }
+
+  private maybeAlert(now: number): void {
+    const settings = this.deps.getSettings()
+    if (!settings.enabled || !settings.alertsEnabled || !this.allowFake()) return
+    if (now < this.nextAlertAt) return
+    this.nextAlertAt = now + alertIntervalMs(settings.alertFrequency, Math.random)
+    this.showAlert(
+      rollAlert({
+        min: settings.alertMin,
+        max: settings.alertMax,
+        currency: settings.alertCurrency,
+        sound: settings.alertSound,
+        tts: settings.alertTts,
+        avoid: new Set(this.avoid.map((name) => name.toLowerCase())),
+        now
+      }),
+      false
+    )
+  }
+
+  private showAlert(draft: AlertDraft, force: boolean): void {
+    const settings = this.deps.getSettings()
+    if (!force && !settings.alertsEnabled) return
+    if (!isKidSafe(draft.message.text) || !isKidSafe(draft.message.username)) return
+    bumpViewers(this.crowd, draft.viewerBump, Date.now())
+    this.recentLines.push(`${draft.message.username}: ${draft.message.text}`)
+    if (this.recentLines.length > 8) this.recentLines.shift()
+    noteText(this.memory, `${draft.message.username} ${draft.message.amount ?? ''} ${draft.message.text}`, Date.now())
+    this.deps.sendMessage(draft.message)
+    this.deps.sendAlert?.({
+      kind: draft.message.kind,
+      username: draft.message.username,
+      amount: draft.message.amount ?? '',
+      text: draft.message.text,
+      sound: draft.sound,
+      volume: settings.alertVolume,
+      speak: settings.alertTts ? draft.speak : null
+    })
+    if (draft.reactions.length && this.allowFake()) this.enqueue(draft.reactions)
+    this.publish()
+  }
+
   changeSpeed(direction: 'slower' | 'faster'): void {
     const next = stepSpeed(this.deps.getSettings().speedLevel, direction)
     this.deps.updateSettings({ speedLevel: next })
@@ -241,10 +399,11 @@ export class ChatController {
   private localBatch(count: number, avoid: Set<string>, screen: ScreenCue | null): ChatMessage[] {
     this.syncCustom()
     const custom = this.deps.customCrowd?.() ?? { viewers: [], randomNames: [] }
-    const heard = [this.lastHeard, this.pcLines.at(-1) ?? '', screen?.title ?? ''].filter(Boolean).join(' ')
+    const recentNames = this.recentLines.map((line) => speakerOf(line)).filter((name) => name.length > 2)
+    const heard = [this.lastHeard, this.pcLines.at(-1) ?? '', screen?.title ?? '', this.activity?.game ?? ''].filter(Boolean).join(' ')
     const intent = detectIntent(heard, {
       loud: this.loud,
-      names: [...this.crowd.viewers.map((viewer) => viewer.name), ...custom.viewers.map((viewer) => viewer.username)]
+      names: [...this.crowd.viewers.map((viewer) => viewer.name), ...custom.viewers.map((viewer) => viewer.username), ...recentNames]
     })
     const guided = intent.intent === 'question' || intent.intent === 'ask-chat' ? Math.max(count, 3) : count
     return makeLocalMessages({
@@ -270,11 +429,16 @@ export class ChatController {
       joke: this.memory.joke,
       fact: [...this.facts.values()].at(-1),
       knowledgeLine: referenceLine(this.knowledge, Math.random) ?? undefined,
-      now: Date.now()
+      now: Date.now(),
+      activity:
+        this.activity && Date.now() - this.activity.at < 12_000
+          ? { state: this.activity.state, game: this.activity.game, at: this.activity.at }
+          : null
     })
   }
 
   private idleFill(count = 2): void {
+    if (!this.allowFake()) return
     const avoid = new Set(this.avoid.map((name) => name.toLowerCase()))
     const settings = this.deps.getSettings()
     if (!chatUsesService(settings.aiMode, process.env.CHATMODE_DEMO === '1')) {
@@ -304,6 +468,18 @@ export class ChatController {
       noteChatLine(this.crowd, message.text)
     }
     this.deps.sendMessage(message)
+    if (!this.isAlert(message.kind) || !this.deps.getSettings().alertsEnabled) return
+    const settings = this.deps.getSettings()
+    bumpViewers(this.crowd, 2, Date.now())
+    this.deps.sendAlert?.({
+      kind: message.kind,
+      username: message.username,
+      amount: message.amount ?? '',
+      text: message.text,
+      sound: settings.alertSound,
+      volume: settings.alertVolume,
+      speak: null
+    })
   }
 
   private rememberPoster(message: ChatMessage): void {
@@ -468,6 +644,7 @@ export class ChatController {
     if (!this.alive || this.busy || this.brainBusy) return
     const settings = this.deps.getSettings()
     if (!settings.enabled) return
+    this.maybeAlert(Date.now())
     this.advanceCrowd()
     const slots = chatSlots(this.crowd)
     const wantVoice = this.voicePending
@@ -566,7 +743,10 @@ export class ChatController {
       viewerCount: this.crowd.count,
       avoid: [...this.avoid],
       now: Date.now(),
-      rng: Math.random
+      rng: Math.random,
+      activity: this.activity?.detail ?? '',
+      liveLines: this.deps.liveLines?.() ?? this.recentLines.slice(-4),
+      joke: this.memory.joke
     }
   }
 
@@ -579,7 +759,8 @@ export class ChatController {
     try {
       const messages = await this.deps.brain?.generate(this.brainTurn(screen?.title ?? null))
       if (!this.alive || !this.holdBrain(this.deps.getSettings())) return
-      if (messages?.length) this.enqueue(messages, paceFor(this.deps.getSettings().brainSpeed).intervalMs)
+      const polished = messages?.length ? polishBrainLines(messages, this.recentLines, this.allowedBlob()) : []
+      if (polished.length) this.enqueue(polished, paceFor(this.deps.getSettings().brainSpeed).intervalMs)
       else {
         const avoid = new Set(this.avoid.map((name) => name.toLowerCase()))
         this.enqueue(this.localBatch(count, avoid, screen))
@@ -638,8 +819,9 @@ export class ChatController {
           this.brainAt = Date.now()
           const messages = await this.deps.brain?.generate(this.brainTurn(signal?.title ?? null))
           if (controller.signal.aborted || !this.alive) return
-          if (messages?.length && this.holdBrain(this.deps.getSettings())) {
-            this.enqueue(messages, paceFor(this.deps.getSettings().brainSpeed).intervalMs)
+          const polished = messages?.length ? polishBrainLines(messages, this.recentLines, this.allowedBlob()) : []
+          if (polished.length && this.holdBrain(this.deps.getSettings())) {
+            this.enqueue(polished, paceFor(this.deps.getSettings().brainSpeed).intervalMs)
             this.publish()
             return
           }
@@ -717,7 +899,9 @@ export class ChatController {
           pcAudio,
           recentLines: [...this.recentLines],
           avoidUsernames: [...this.avoid],
-          context: compactContext(this.knowledge, Date.now()),
+          context: [compactContext(this.knowledge, Date.now()), this.activity ? `Screen activity: ${this.activity.detail}` : '']
+            .filter(Boolean)
+            .join('\n'),
           customBlock: customPromptBlock(this.deps.customCrowd?.().viewers ?? [], this.deps.customCrowd?.().randomNames ?? []),
           speedLevel: settings.speedLevel,
           now: Date.now(),

@@ -36,6 +36,9 @@ export interface BrainTurn {
   avoid: string[]
   now: number
   rng: () => number
+  activity?: string
+  liveLines?: string[]
+  joke?: string
 }
 
 interface CatalogFile {
@@ -164,7 +167,14 @@ export function buildBrainPrompt(input: BrainTurn, pace: BrainPace): { system: s
     `Return JSON only, with exactly ${pace.batch} messages: {"messages":[{"username":"Name","badge":null,"message":"short line"}]}`,
     'Usernames are 3 to 16 characters and use only letters, numbers, and underscores. badge is null, "sub", "vip", or "mod".',
     'Each message is 2 to 14 words. Mix personalities: hype, a short question, a calm viewer, a light tease that is never cruel, and someone who answers what was just said.',
-    'No slurs, sexual content, cruelty, politics, or self-harm. Do not invent a score, a boss, or an event that nobody mentioned.',
+    'If viewer notes list usernames, use some of those names and match their role.',
+    'No slurs, sexual content, cruelty, politics, or self-harm. Do not invent a score, a boss, an item, or a name that is not in the transcript, audio, window title, screen activity, or real chat.',
+    'Example:',
+    'Streamer: I found a red key',
+    'Screen: steady motion. Window title matches Minecraft.',
+    'Nova: the red key??',
+    'Lurk_7: dont lose it',
+    'PixelMod: nice find',
     custom
   ]
     .filter(Boolean)
@@ -180,6 +190,9 @@ export function buildBrainPrompt(input: BrainTurn, pace: BrainPace): { system: s
     'Computer audio:',
     heard.length ? heard.join('\n') : '(quiet)',
     input.context.trim() ? `Story so far: ${clip(input.context, 420)}` : '',
+    input.activity?.trim() ? `Screen activity (local, not a picture): ${clip(input.activity, 240)}. React to the motion or the title. Do not invent objects.` : '',
+    input.joke?.trim() ? `Running joke to reuse, not a new one: the ${clip(input.joke, 24)} arc continues` : '',
+    input.liveLines?.length ? `Real chat:\n${input.liveLines.slice(-4).map((line) => clip(line, 140)).join('\n')}` : '',
     'Recent chat:',
     recent.length ? recent.join('\n') : '(none)',
     'Do not reuse these usernames:',
@@ -192,6 +205,38 @@ export function buildBrainPrompt(input: BrainTurn, pace: BrainPace): { system: s
 
 function safeMessage(message: ChatMessage): boolean {
   return isKidSafe(message.text) && isKidSafe(message.username)
+}
+
+function normLine(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+export function polishBrainLines(messages: ChatMessage[], recent: string[], allowed = ''): ChatMessage[] {
+  const seen = new Set(recent.map(normLine).filter(Boolean))
+  const out: ChatMessage[] = []
+  const blob = allowed.toLowerCase()
+  for (const message of messages) {
+    if (!isKidSafe(message.text) || !isKidSafe(message.username)) continue
+    if (/\b(screenshot|transcript|language model|as an ai)\b/i.test(message.text)) continue
+    const words = message.text.trim().split(/\s+/)
+    if (words.length < 1 || words.length > 18) continue
+    const key = normLine(message.text)
+    if (!key || seen.has(key)) continue
+    const overlap = [...seen].some((line) => {
+      const a = new Set(key.split(' '))
+      const b = line.split(' ')
+      if (!b.length) return false
+      const shared = b.filter((word) => a.has(word)).length
+      return shared / b.length > 0.8 && Math.abs(a.size - b.length) <= 2
+    })
+    if (overlap) continue
+    if (blob && /\b(boss|score|inventory)\b/i.test(message.text) && !blob.includes('boss') && !blob.includes('score') && !blob.includes('inventory')) {
+      continue
+    }
+    seen.add(key)
+    out.push({ ...message, text: message.text.trim().slice(0, 140) })
+  }
+  return out
 }
 
 export function messagesFromBrain(raw: string, ctx: ParseContext): ChatMessage[] {

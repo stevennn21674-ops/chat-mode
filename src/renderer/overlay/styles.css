@@ -109,6 +109,22 @@ body { pointer-events: none; }
 
 .pill.speed { font-variant-numeric: tabular-nums; }
 
+.alert {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: linear-gradient(90deg, rgba(255, 196, 60, 0.95), rgba(255, 122, 69, 0.92));
+  color: #1a1204;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.alert p { margin: 0; }
+#alert-kicker { font-size: 11px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+#alert-main { font-size: 15px; font-weight: 800; }
+#alert-text { font-size: 13px; }
+
 .log {
   flex: 1;
   display: flex;
@@ -176,7 +192,9 @@ body { pointer-events: none; }
   border-radius: 8px;
 }
 
-.line.donation { background: rgba(255, 196, 60, 0.14); }
+.line.donation,
+.line.bits,
+.line.gift { background: rgba(255, 196, 60, 0.14); }
 .line.sub { background: rgba(168, 77, 255, 0.16); }
 .line.raid { background: rgba(255, 122, 69, 0.16); }
 .line.hype { background: rgba(255, 183, 3, 0.12); }

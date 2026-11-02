@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { ChatMessage, OverlayState, PointerEventPayload } from '../shared/types'
+import type { AlertBanner, ChatMessage, OverlayState, PointerEventPayload } from '../shared/types'
 
 contextBridge.exposeInMainWorld('chat', {
   ready(): void {
@@ -20,5 +20,10 @@ contextBridge.exposeInMainWorld('chat', {
     const listener = (_event: unknown, state: OverlayState): void => callback(state)
     ipcRenderer.on('overlay:state', listener)
     return () => ipcRenderer.removeListener('overlay:state', listener)
+  },
+  onAlert(callback: (alert: AlertBanner) => void): () => void {
+    const listener = (_event: unknown, alert: AlertBanner): void => callback(alert)
+    ipcRenderer.on('overlay:alert', listener)
+    return () => ipcRenderer.removeListener('overlay:alert', listener)
   }
 })

@@ -107,10 +107,13 @@ export function buildUserText(input: {
   const heard = heardLines.length ? heardLines.map((line, index) => `${index + 1}. ${line}`).join('\n') : '(nothing notable)'
   const recent = input.recentLines.length ? input.recentLines.slice(-8).join('\n') : '(no recent chat)'
   const avoid = input.avoidUsernames.slice(-40).join(', ') || '(none)'
-  const context = input.context?.trim() ? input.context.trim().slice(0, 420) : ''
+  const context = input.context?.trim() ? input.context.trim().slice(0, 700) : ''
+  const hasActivity = context.includes('Screen activity:')
   const sight = input.hasImage
     ? 'This is what is on the screen right now. React to the game, menu, or whatever is actually there, as a viewer who can see it.'
-    : 'The screen was not included this time. React to what the streamer said, any audio on the PC, and the recent chat. Do not invent what is on the screen.'
+    : hasActivity
+      ? 'The screen picture was not included. A local activity note is below. React only to that note, the audio, the title, and chat. Do not invent objects, names, or scores.'
+      : 'The screen was not included this time. React to what the streamer said, any audio on the PC, and the recent chat. Do not invent what is on the screen.'
   return [
     `Write the next batch of viewer chat for this exact moment. Return exactly ${input.batchCount} messages.`,
     sight,

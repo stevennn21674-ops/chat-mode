@@ -18,9 +18,9 @@ The chat is synthetic. It is not connected to a real stream.
 
 Ctrl, Alt, and the Windows key together with V do not open the mic, so paste shortcuts stay quiet. A plain V does, including while you are typing.
 
-Clicks outside the chat panel go to whatever is underneath. The panel itself captures the mouse only while the pointer is over it.
+Clicks outside the chat panel go to whatever is underneath. The panel itself captures the mouse only while the pointer is over it. Game mode re-asserts the topmost window, and the app writes the click-through flag again after each re-assert so the chat still receives clicks.
 
-A small speed meter appears when you change speed. Pressing the backtick key blinks the tray icon and sets the tray tooltip to **reading the screen**. That indicator stays on the tray, not in the chat. **Mic live** shows while V is held.
+The speed meter stays in the header. Settings has the same speed slider, **Lock position**, and the tray has **Slower** and **Faster**. A locked chat still changes speed on click, and it does not move. Pressing the backtick key blinks the tray icon and sets the tray tooltip to **reading the screen**. **Mic live** shows while V is held.
 
 Position, size, speed, opacity, font size, device choice, and the other toggles are saved and restored the next time the app starts.
 
@@ -29,6 +29,20 @@ The header shows an eye icon and a viewer count. It starts at a plausible number
 Simulated viewers each have an engagement level. A static screen, a long silence, or repetitive lines make them bored: chat slows down, some of them say things like `lol bored`, `gn`, or `brb`, and the count drops as they go. Talking, a backtick read, or a big screen change brings viewers back under new random usernames.
 
 Some viewers are moderators and show a green sword. Hold V and say `ban <name>`, `timeout <name>`, `mods ban him`, `ban the last guy`, `ban the spammer`, or `ban everyone` / `ban all the bots`. A mod answers in chat, that person's messages are removed, a `<name> has been banned` line appears, the viewer count drops, and that viewer does not speak again. Names can be partial (`pixel` for `xX_PixelFox99`), missing a letter, or a whisper misspelling. This works with AI mode on or off and does not call the comment service. Settings has **Show debug transcript**, which prints the last heard line on the overlay. The same line and the parsed command are appended to `voice-debug.log` in the app data folder.
+
+## Screen activity
+
+By default the app samples a 64 by 36 thumbnail about every 2.5 seconds. It does not upload that picture. It estimates motion, a hard cut or flash, darkness, a still menu, a loading-looking frame, a sudden red or fade that can be a game over, and a victory only when the window title says so. The window title is also checked for Roblox, Minecraft, Escape the Backrooms, Fortnite, and FNF. Chat lines follow that state (`WAIT WHAT WAS THAT`, `dark again lol`, `he's running!!`, `bro stopped moving`, `NOOO he died`) in AI-off templates, local brain context, and the next AI-mode request. They do not add a call by themselves, and they do not name objects that were not in the title, the audio, or a real vision request.
+
+Sampling pauses while the computer is idle, waits longer when the picture is not changing, and skips itself on battery when that box is on. **Auto vision** is off. Turn it on only if you want a real screenshot after a big change while AI mode is on. It stays under the hourly cap in Settings.
+
+## Alerts
+
+Fake donations, subs, bits, gifted subs, and raids can show a banner for a few seconds, play a short original tone (coin, chime, arcade, or horn), bump the viewer count, and draw a thank-you in chat. Messages are kid-friendly. Volume, how often, currency, and the amount range are in Settings. **Test donation** plays one immediately. **Read alerts with Windows speech** uses the system speech synthesizer. None of the sounds are taken from a game or a stream.
+
+## Real chat
+
+Twitch joins `wss://irc-ws.chat.twitch.tv` as `justinfan` plus digits. No login. Usernames, colors, and badges come from IRC tags. Cheers, subs, gifts, and raids use the same alert sounds. YouTube first tries the public live chat page and innertube `get_live_chat` polling from a video URL, id, or `@handle`. That unofficial endpoint can break. A YouTube Data API v3 key in Settings is optional, encrypted on this PC, and is the stable path for `liveChat/messages`. **Connect** and **Disconnect** show a status line. **Real only** stops the idle fake crowd and fake alerts while a chat is connected. **Real + fake** keeps both. Offline mode does not connect, and a drop retries with backoff. Real lines are filtered when **Hide bad words** is on (the default), and they are added to the local keyword memory and the AI context. There are no moderation hooks for real chat.
 
 ## Tray and settings
 
@@ -48,7 +62,9 @@ With AI mode off and a connection available, a few names or game titles can be l
 
 **Local brain** is a separate checkbox, on by default. With AI mode off and the model file present, viewer lines are written by a small on-device model instead of the built-in templates. It sees the same kind of context the cloud path uses: the mic transcript, the computer-audio story, the window title, custom viewer personalities, and whether the room is bored. Several viewers are written in one pass. It runs at low priority, caps the reply, and waits about 6 to 10 seconds between passes. **Brain speed** is light, normal, or heavy. If the CPU is already busy, or the model is missing, slow, or errors, chat falls back to the built-in lines. Ban commands still use the built-in parser. The kid-friendly filter still applies. The model is smaller and less accurate than the cloud model.
 
-The included model is Qwen2.5-0.5B-Instruct Q8 (about 644 MB). A faster Q4 build (about 469 MB) is the small size and is not in the installer; Settings asks before downloading it and shows the size. The download can resume, and **Delete model** removes the copies from this PC. After the file is on disk, local brain does not use the network, including in offline mode. The Windows build also ships a CPU build of llama.cpp beside the app, not inside the asar archive. The model is not inside the asar archive either.
+The included model is Qwen2.5-0.5B-Instruct Q8 (about 644 MB). A faster Q4 build of the same 0.5B model (about 469 MB) is the small size and is not in the installer. **Smarter brain** is an optional download of Qwen2.5-1.5B-Instruct Q4_K_M (about 1.04 GB). It is not in the installer, so the Windows build stays under the size limit. It is a bit more accurate than the 0.5B model and uses more CPU and RAM. It is still well behind the cloud model. Settings asks before downloading and shows the size. The download can resume, and **Delete model** removes the copies from this PC. After a file is on disk, local brain does not use the network, including in offline mode. The Windows build also ships a CPU build of llama.cpp beside the app, not inside the asar archive. The bundled model is not inside the asar archive either.
+
+With AI mode off, local brain is the default when a model file is present. The prompt includes the mic, computer audio, window title, local screen activity, real chat if it is connected, viewer notes, recent lines, and a short example of stream chat. Lines that repeat recent chat, run too long, or fail the kid-friendly filter are dropped. If the model is missing, busy, or slow, the built-in lines answer from the same cues: questions, names, a running joke, and the screen activity. That rule layer is more on-topic than the old random templates, and it is still not as accurate as the cloud model.
 
 **Custom viewers** are edited in Settings, saved in the app data folder, and can be imported or exported as JSON. Each one has a role, color, a short personality, sliders, catchphrases, and topics. There is a hater preset and a list of extra random usernames. AI mode puts the active personalities in the prompt. With AI mode off, those sliders and phrases shape the lines. A custom moderator can be the one who answers a voice ban. Haters only tease lightly.
 
@@ -87,7 +103,7 @@ npm run dev
 
 You can type the key in Settings. Optionally copy `.env.example` to `.env` and set `AGNES_API_KEY` before `npm run dev` or `npm run build` if you want that key sealed into the app as a fallback. `.env` is gitignored and is not required.
 
-`npm test` covers the message parser, the slang prompt, the safety filter, speed steps, settings files, computer-audio silence, viewer count and boredom, mod commands, the offline generator, local understanding, custom viewers, and a mocked comment service. `npm run typecheck` checks the TypeScript.
+`npm test` covers the message parser, the slang prompt, the safety filter, speed steps, the click-to-speed and drag decisions, settings files, computer-audio silence, viewer count and boredom, mod commands, the offline generator, local understanding, an offline reply check, screen-activity classification, alert text and tones, Twitch and YouTube parsing, custom viewers, and a mocked comment service. `npm run typecheck` checks the TypeScript.
 
 Voice transcription needs the local speech binary and the tiny English model:
 
@@ -128,7 +144,12 @@ These were not verified on a real Windows desktop in this environment. The code 
 - Microphone capture, device selection, and on-device transcription.
 - System-audio loopback (`getDisplayMedia` with `audio: 'loopback'`). It is a Windows feature. Silent audio is ignored before transcription.
 - Whether Windows screen capture omits the overlay. The window is marked to be excluded. On the Linux desktop used during development, capture itself worked, and the overlay was still visible in the image.
-- Click-through, right-drag moving, and the installer or portable exe themselves.
+- Click-through, right-drag moving, and lock position over a real Windows desktop, including Game mode. The gesture decisions are unit-tested. The Windows topmost flag and `uiohook` mouse hook were not exercised here.
+- Donation banners, synthesized tones, and Windows `speechSynthesis` read-aloud.
+- Twitch anonymous IRC, YouTube innertube live chat, and the YouTube Data API path. The innertube endpoint is unofficial and can break.
+- The local 64 by 36 screen watch, foreground window title, and auto vision cap on a real desktop.
+- The optional 1.5B smarter-brain download, its CPU use, and how close its chat is to the cloud model. The included model is still Qwen2.5-0.5B. Offline lines are more on-topic than before and still miss jokes, names, and scene detail the cloud model gets from a real picture.
+- The installer or portable exe themselves.
 - Launch at startup. The setting is stored, and it is applied only in a packaged build.
 - The viewer-count header, green sword badge, AI mode checkbox, and local brain settings on a real Windows desktop.
 - The bundled llama.cpp runtime: loading Qwen2.5-0.5B-Instruct, low-priority CPU use, brain speed, the busy-CPU fallback, delete, and a resumed download. Those paths were not run on Windows here.

@@ -4,6 +4,7 @@ import { badgeOf, pickCustom, viewerLine, type CustomViewer } from './custom-vie
 import { isKidSafe } from './filter'
 import { makeId } from './ids'
 import { nluLine, personalityFor, type Intent } from './nlu'
+import { activityLines, type ActivityState } from './screen-activity'
 import type { ScreenCue } from './screen-cues'
 import type { Badge, ChatMessage } from './types'
 import { makeUsername } from './usernames'
@@ -178,6 +179,7 @@ export interface LocalInput {
   joke?: string
   fact?: string
   knowledgeLine?: string
+  activity?: { state: ActivityState; game: string | null; at: number } | null
 }
 
 function pick<T>(items: readonly T[], rng: () => number): T {
@@ -377,6 +379,16 @@ export function makeLocalMessages(input: LocalInput): ChatMessage[] {
         speaker = { name: person.username, badge: badgeOf(person.role), color: person.color }
         text = viewerLine(person, input.rng, keywords)
       }
+    }
+    if (
+      !text &&
+      !forceBored &&
+      i === 0 &&
+      input.activity &&
+      (input.now ?? 0) - input.activity.at < 12_000
+    ) {
+      const candidate = pick(activityLines(input.activity.state, input.activity.game), input.rng)
+      if (isKidSafe(candidate)) text = candidate
     }
     if (!text && !forceBored && input.intent && input.intent !== 'none' && input.rng() < 0.85) {
       text = nluLine({

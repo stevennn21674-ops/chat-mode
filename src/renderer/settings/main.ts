@@ -15,6 +15,7 @@ interface SettingsBridge {
   customImport(): Promise<CustomCrowd>
   downloadBrain(): Promise<{ ok: boolean; detail: string }>
   deleteBrain(): Promise<SettingsView>
+  testAlert(): Promise<boolean>
   onChange(callback: (view: SettingsView) => void): () => void
 }
 
@@ -67,6 +68,30 @@ const keyHint = document.querySelector('#key-hint') as HTMLElement
 const relay = document.querySelector('#relay') as HTMLElement
 const proxy = document.querySelector('#proxy') as HTMLInputElement
 const token = document.querySelector('#token') as HTMLInputElement
+const lockPosition = document.querySelector('#lock-position') as HTMLInputElement
+const screenWatch = document.querySelector('#screen-watch') as HTMLInputElement
+const pauseBattery = document.querySelector('#pause-battery') as HTMLInputElement
+const autoVision = document.querySelector('#auto-vision') as HTMLInputElement
+const visionCap = document.querySelector('#vision-cap') as HTMLInputElement
+const visionOut = document.querySelector('#vision-out') as HTMLOutputElement
+const alerts = document.querySelector('#alerts') as HTMLInputElement
+const volume = document.querySelector('#volume') as HTMLInputElement
+const volumeOut = document.querySelector('#volume-out') as HTMLOutputElement
+const alertFrequency = document.querySelector('#alert-frequency') as HTMLSelectElement
+const alertSound = document.querySelector('#alert-sound') as HTMLSelectElement
+const currency = document.querySelector('#currency') as HTMLInputElement
+const alertMin = document.querySelector('#alert-min') as HTMLInputElement
+const alertMax = document.querySelector('#alert-max') as HTMLInputElement
+const alertTts = document.querySelector('#alert-tts') as HTMLInputElement
+const testAlert = document.querySelector('#test-alert') as HTMLButtonElement
+const twitch = document.querySelector('#twitch') as HTMLInputElement
+const youtube = document.querySelector('#youtube') as HTMLInputElement
+const youtubeKey = document.querySelector('#youtube-key') as HTMLInputElement
+const chatMix = document.querySelector('#chat-mix') as HTMLSelectElement
+const hideWords = document.querySelector('#hide-words') as HTMLInputElement
+const liveConnect = document.querySelector('#live-connect') as HTMLButtonElement
+const liveDisconnect = document.querySelector('#live-disconnect') as HTMLButtonElement
+const liveStatus = document.querySelector('#live-status') as HTMLElement
 
 function idleValue(input: HTMLInputElement, value: string): void {
   if (document.activeElement === input) return
@@ -82,6 +107,13 @@ function render(view: SettingsView): void {
   offline.checked = view.offlineMode
   debugTranscript.checked = view.showDebugTranscript
   gameMode.checked = view.overlayMode === 'game'
+  lockPosition.checked = view.lockPosition
+  screenWatch.checked = view.screenWatch
+  pauseBattery.checked = view.pauseWatchOnBattery
+  autoVision.checked = view.autoVision
+  alerts.checked = view.alertsEnabled
+  alertTts.checked = view.alertTts
+  hideWords.checked = view.hideBadWords
   offlineNote.textContent = view.effectivelyOffline && !view.offlineMode ? 'No internet right now, so chat is staying offline.' : ''
   idleValue(speed, String(view.speedLevel))
   idleValue(opacity, String(Math.round(view.opacity * 100)))
@@ -92,6 +124,9 @@ function render(view: SettingsView): void {
   localBrain.checked = view.localBrain
   if (document.activeElement !== brainSpeed) brainSpeed.value = view.brainSpeed
   if (document.activeElement !== brainSize) brainSize.value = view.brainSize
+  if (document.activeElement !== alertFrequency) alertFrequency.value = view.alertFrequency
+  if (document.activeElement !== alertSound) alertSound.value = view.alertSound
+  if (document.activeElement !== chatMix) chatMix.value = view.chatMix
   brainNote.textContent = view.localBrainNote
   brainDownload.textContent = view.localBrainButton
   brainDownload.disabled = view.localBrainDownloading
@@ -106,6 +141,17 @@ function render(view: SettingsView): void {
   capOut.textContent = String(view.maxCallsPerHour)
   usage.textContent = `Calls this hour: ${view.callsThisHour} / ${view.maxCallsPerHour}.`
   speedOut.textContent = `${view.speedLevel} / 7`
+  visionOut.textContent = String(view.autoVisionPerHour)
+  volumeOut.textContent = `${Math.round(view.alertVolume * 100)}%`
+  liveStatus.textContent = view.liveStatus
+  idleValue(visionCap, String(view.autoVisionPerHour))
+  idleValue(volume, String(Math.round(view.alertVolume * 100)))
+  idleValue(currency, view.alertCurrency)
+  idleValue(alertMin, String(view.alertMin))
+  idleValue(alertMax, String(view.alertMax))
+  idleValue(twitch, view.twitchChannel)
+  idleValue(youtube, view.youtubeLive)
+  if (view.includeKey) idleValue(youtubeKey, view.youtubeApiKey)
   opacityOut.textContent = `${Math.round(view.opacity * 100)}%`
   fontOut.textContent = `${view.fontSize}px`
   pause.textContent = view.capturePaused ? 'Resume screen capture' : 'Pause screen capture'
@@ -165,6 +211,42 @@ startup.addEventListener('change', () => void window.settings.update({ launchAtS
 offline.addEventListener('change', () => void window.settings.update({ offlineMode: offline.checked }))
 debugTranscript.addEventListener('change', () => void window.settings.update({ showDebugTranscript: debugTranscript.checked }))
 gameMode.addEventListener('change', () => void window.settings.update({ overlayMode: gameMode.checked ? 'game' : 'normal' }))
+lockPosition.addEventListener('change', () => void window.settings.update({ lockPosition: lockPosition.checked }))
+screenWatch.addEventListener('change', () => void window.settings.update({ screenWatch: screenWatch.checked }))
+pauseBattery.addEventListener('change', () => void window.settings.update({ pauseWatchOnBattery: pauseBattery.checked }))
+autoVision.addEventListener('change', () => void window.settings.update({ autoVision: autoVision.checked }))
+alerts.addEventListener('change', () => void window.settings.update({ alertsEnabled: alerts.checked }))
+alertTts.addEventListener('change', () => void window.settings.update({ alertTts: alertTts.checked }))
+hideWords.addEventListener('change', () => void window.settings.update({ hideBadWords: hideWords.checked }))
+alertFrequency.addEventListener('change', () => {
+  const value = alertFrequency.value
+  if (value === 'rare' || value === 'normal' || value === 'often') void window.settings.update({ alertFrequency: value })
+})
+alertSound.addEventListener('change', () => {
+  const value = alertSound.value
+  if (value === 'coin' || value === 'chime' || value === 'arcade' || value === 'horn') void window.settings.update({ alertSound: value })
+})
+chatMix.addEventListener('change', () => {
+  const value = chatMix.value
+  if (value === 'real' || value === 'mixed') void window.settings.update({ chatMix: value })
+})
+volume.addEventListener('input', () => {
+  volumeOut.textContent = `${volume.value}%`
+  void window.settings.update({ alertVolume: Number(volume.value) / 100 })
+})
+visionCap.addEventListener('input', () => {
+  visionOut.textContent = visionCap.value
+  void window.settings.update({ autoVisionPerHour: Number(visionCap.value) })
+})
+currency.addEventListener('change', () => void window.settings.update({ alertCurrency: currency.value }))
+alertMin.addEventListener('change', () => void window.settings.update({ alertMin: Number(alertMin.value) }))
+alertMax.addEventListener('change', () => void window.settings.update({ alertMax: Number(alertMax.value) }))
+twitch.addEventListener('change', () => void window.settings.update({ twitchChannel: twitch.value }))
+youtube.addEventListener('change', () => void window.settings.update({ youtubeLive: youtube.value }))
+youtubeKey.addEventListener('change', () => void window.settings.update({ youtubeApiKey: youtubeKey.value }))
+testAlert.addEventListener('click', () => void window.settings.testAlert())
+liveConnect.addEventListener('click', () => void window.settings.update({ liveLink: true }))
+liveDisconnect.addEventListener('click', () => void window.settings.update({ liveLink: false }))
 mic.addEventListener('change', () => void window.settings.update({ micDeviceId: mic.value }))
 speed.addEventListener('input', () => {
   speedOut.textContent = `${speed.value} / 7`
@@ -191,7 +273,7 @@ brainSpeed.addEventListener('change', () => {
 })
 brainSize.addEventListener('change', () => {
   const size = brainSize.value
-  if (size === 'small' || size === 'medium') void window.settings.update({ brainSize: size })
+  if (size === 'small' || size === 'medium' || size === 'smart') void window.settings.update({ brainSize: size })
 })
 brainDownload.addEventListener('click', () => {
   brainDownload.disabled = true

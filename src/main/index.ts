@@ -20,7 +20,9 @@ import { LoopbackController } from './loopback'
 import { loadPage, OverlayController, placeOverlay, preloadPath } from './overlay'
 import { defaultPlacement, initialSize } from '../shared/placement'
 import { CustomStore } from './custom-store'
-import { credentialsFile, customViewersFile, resourceDir, settingsFile, usageFile, voiceDebugFile, wikiCacheFile, whisperLocation } from './paths'
+import { LiveChat } from './live-chat'
+import { credentialsFile, customViewersFile, resourceDir, settingsFile, usageFile, voiceDebugFile, wikiCacheFile, whisperLocation, youtubeKeyFile } from './paths'
+import { ScreenWatch } from './screen-watch'
 import { getServiceConfig } from './service-config'
 import { SettingsStore } from './store'
 import { asFloat32, TalkController } from './talk'
@@ -123,6 +125,9 @@ async function bootstrap(): Promise<void> {
   const specifiedAiMode = aiModeSpecified(readRawSettings(settingsPath))
   const store = new SettingsStore(settingsPath, readSettingsFile(settingsPath))
   const credentials = new CredentialStore(credentialsFile())
+  const youtubeKeys = new CredentialStore(youtubeKeyFile())
+  let liveStatus = 'Not connected'
+  let liveRef: LiveChat | null = null
   if (specifiedAiMode === null) {
     const hasKey = credentials.get().length > 0 || getServiceConfig().apiKey.length > 0
     store.settings.aiMode = defaultAiMode(hasKey, null)
@@ -216,7 +221,12 @@ async function bootstrap(): Promise<void> {
       ready: () => brain.ready(),
       cpu: () => brain.cpu(),
       generate: (turn) => brain.generate(turn)
-    }
+    },
+    sendAlert: (alert) => {
+      if (!chatRef || chatRef.win.isDestroyed()) return
+      chatRef.win.webContents.send('overlay:alert', alert)
+    },
+    liveLines: () => liveRef?.recent() ?? []
   })
 
   const overlay = new OverlayController(
@@ -228,8 +238,29 @@ async function bootstrap(): Promise<void> {
     }
   )
   chatRef = overlay
+  overlay.setLocked(store.settings.lockPosition)
   guard(overlay.win)
   loadPage(overlay.win, 'overlay')
+  const live = new LiveChat({
+    getSettings: () => store.settings,
+    offline: () => effectivelyOffline(store.settings.offlineMode, reachable),
+    youtubeKey: () => youtubeKeys.get(),
+    onItem: (item) => controller.acceptLive(item),
+    onStatus: (text) => {
+      if (text === liveStatus) return
+      liveStatus = text
+      if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.webContents.send('settings:changed', view(false))
+    },
+    onActive: (active) => controller.setLiveActive(active),
+    log
+  })
+  liveRef = live
+  const screenWatch = new ScreenWatch({
+    getSettings: () => store.settings,
+    power: powerState,
+    onActivity: (event) => controller.noteActivity(event),
+    log
+  })
 
   const talk = new TalkController({
     voice,
@@ -269,6 +300,13 @@ async function bootstrap(): Promise<void> {
       refresh()
     },
     setPaused: (value) => controller.setCapturePaused(value),
+    slower: () => controller.changeSpeed('slower'),
+    faster: () => controller.changeSpeed('faster'),
+    setLock: (value) => {
+      store.update({ lockPosition: value })
+      overlay.setLocked(value)
+      refresh()
+    },
     openSettings: () => openSettings(),
     resetPosition: () => resetPosition(),
     status: () => statusText()
@@ -289,9 +327,11 @@ async function bootstrap(): Promise<void> {
   }
 
   function refresh(): void {
+    overlay.setLocked(store.settings.lockPosition)
     tray.render()
     publish(controller.snapshot())
     applyVisibility()
+    live.sync()
   }
 
   function view(includeKey = false): SettingsView {
@@ -324,7 +364,10 @@ async function bootstrap(): Promise<void> {
       localBrainDeletable: panel.deletable,
       localBrainProgress: panel.progress,
       localBrainNote: panel.note,
-      localBrainButton: panel.button
+      localBrainButton: panel.button,
+      youtubeApiKey: includeKey ? youtubeKeys.get() : '',
+      hasYoutubeKey: youtubeKeys.get().length > 0,
+      liveStatus
     }
   }
 
@@ -400,7 +443,7 @@ async function bootstrap(): Promise<void> {
     }
     settingsWindow = new BrowserWindow({
       width: 480,
-      height: 920,
+      height: 1040,
       minWidth: 400,
       minHeight: 560,
       show: false,
@@ -464,6 +507,9 @@ async function bootstrap(): Promise<void> {
     if (patch && typeof patch === 'object' && typeof (patch as { capturePaused?: unknown }).capturePaused === 'boolean') {
       controller.setCapturePaused((patch as { capturePaused: boolean }).capturePaused)
     }
+    if (patch && typeof patch === 'object' && typeof (patch as { youtubeApiKey?: unknown }).youtubeApiKey === 'string') {
+      youtubeKeys.set((patch as { youtubeApiKey: string }).youtubeApiKey)
+    }
     store.update(patch)
     brain.onSettings()
     if (store.settings.launchAtStartup !== before) applyLogin(store.settings.launchAtStartup)
@@ -476,6 +522,10 @@ async function bootstrap(): Promise<void> {
     return view()
   })
   ipcMain.handle('settings:mics', () => listMics(voice))
+  ipcMain.handle('alerts:test', () => {
+    controller.testDonation()
+    return true
+  })
   ipcMain.handle('brain:download', async () => {
     if (effectivelyOffline(store.settings.offlineMode, reachable)) {
       return { ok: false, detail: 'Offline, so the model was not downloaded. Local brain needs the network only for that download.' }
@@ -507,7 +557,7 @@ async function bootstrap(): Promise<void> {
       cancelId: 1,
       title: 'Delete local brain',
       message: 'Delete the local model from this PC?',
-      detail: 'This frees the space used by the small and medium models. Chat falls back to the built-in lines until you download a model again.'
+      detail: 'This frees the space used by the downloaded models. Chat falls back to the built-in lines until you download a model again.'
     }
     const confirm = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)
     if (confirm.response !== 0) return view(false)
@@ -580,8 +630,15 @@ async function bootstrap(): Promise<void> {
   })
   if (!registered) log('pause hotkey is unavailable')
 
-  hookReady = await startHook(talk, () => overlay.endGesture(), onCaptureKey)
+  hookReady = await startHook(
+    talk,
+    () => overlay.endGesture(),
+    (button) => overlay.mouseDown(button),
+    onCaptureKey
+  )
   controller.start(publish)
+  screenWatch.start()
+  live.sync()
   refresh()
   if (process.env.CHATMODE_SETTINGS === '1') openSettings()
   const pin = (): void => overlay.pin()
@@ -609,6 +666,8 @@ async function bootstrap(): Promise<void> {
     quitting = true
     loopback.setEnabled(false)
     controller.stop()
+    screenWatch.stop()
+    live.stop()
     brain.stop()
     brain.stopSampler()
     store.flush()
@@ -721,7 +780,12 @@ function isPlainGrave(input: Input): boolean {
   return input.code === 'Backquote' && !input.control && !input.alt && !input.meta && !input.shift
 }
 
-async function startHook(talk: TalkController, endGesture: () => void, onCapture: () => void): Promise<boolean> {
+async function startHook(
+  talk: TalkController,
+  endGesture: () => void,
+  onMouseDown: (button: 'left' | 'right') => void,
+  onCapture: () => void
+): Promise<boolean> {
   try {
     const { uIOhook, UiohookKey } = await import('uiohook-napi')
     let graveHeld = false
@@ -739,6 +803,11 @@ async function startHook(talk: TalkController, endGesture: () => void, onCapture
       talk.keyDown()
     })
     uIOhook.on('mousemove', () => noteActivity())
+    uIOhook.on('mousedown', (event) => {
+      noteActivity()
+      const button = event.button === 1 ? 'left' : event.button === 2 ? 'right' : null
+      if (button) onMouseDown(button)
+    })
     uIOhook.on('keyup', (event) => {
       if (event.keycode === UiohookKey.Backquote) graveHeld = false
       if (event.keycode === UiohookKey.V) talk.keyUp()

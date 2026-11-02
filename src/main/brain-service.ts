@@ -34,7 +34,7 @@ interface BrainOptions {
   notify: () => void
 }
 
-const SIZES: BrainSize[] = ['small', 'medium']
+const SIZES: BrainSize[] = ['small', 'medium', 'smart']
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -121,7 +121,9 @@ export class BrainService {
       return
     }
     const choice = this.choice()
-    const threads = clampThreads(paceFor(settings.brainSpeed).threads, cpuCount())
+    const pace = paceFor(settings.brainSpeed)
+    const requested = choice?.size === 'smart' ? Math.min(2, pace.threads) : pace.threads
+    const threads = clampThreads(requested, cpuCount())
     if (!choice || (this.proc && (choice.path !== this.loadedPath || threads !== this.loadedThreads))) this.stop()
   }
 
@@ -235,12 +237,14 @@ export class BrainService {
     const choice = this.choice()
     if (!choice || !this.binaryPath()) return null
     const pace = paceFor(settings.brainSpeed)
-    const threads = clampThreads(pace.threads, cpuCount())
-    const ready = await this.ensure(choice.path, threads, 12_000)
+    const requested = choice.size === 'smart' ? Math.min(2, pace.threads) : pace.threads
+    const threads = clampThreads(requested, cpuCount())
+    const ready = await this.ensure(choice.path, threads, choice.size === 'smart' ? 20_000 : 12_000)
     if (!ready || this.opts.getSettings().aiMode || !this.opts.getSettings().localBrain) return null
     const prompt = buildBrainPrompt(turn, pace)
     try {
-      const content = await this.complete(prompt.system, prompt.user, pace.maxTokens, pace.timeoutMs)
+      const timeout = choice.size === 'smart' ? pace.timeoutMs + 8_000 : pace.timeoutMs
+      const content = await this.complete(prompt.system, prompt.user, Math.min(pace.maxTokens, choice.size === 'smart' ? 200 : pace.maxTokens), timeout)
       if (!content) return null
       const messages = messagesFromBrain(content, {
         now: turn.now,
@@ -404,7 +408,7 @@ export class BrainService {
       existing = 0
     }
     if (existing === total && total > 0) return
-    const headers: Record<string, string> = { 'User-Agent': 'ChatMode/0.5.0' }
+    const headers: Record<string, string> = { 'User-Agent': 'ChatMode/0.6.0' }
     const range = resumeHeader(existing)
     if (range) headers.Range = range.Range
     const response = await fetch(url, { headers, redirect: 'follow', signal })

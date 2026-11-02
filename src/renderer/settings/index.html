@@ -80,11 +80,12 @@
             <option value="heavy">Heavy</option>
           </select>
         </label>
-        <p class="hint">Light waits longer and uses one CPU thread. Heavy answers sooner and uses more CPU. If the PC is already busy, chat falls back to the built-in lines.</p>
+        <p class="hint">Light waits longer and uses one CPU thread. Heavy answers sooner and uses more CPU. If the PC is already busy, chat falls back to the built-in lines. Smarter brain is Qwen2.5-1.5B Q4, downloaded only if you ask. It is not in the installer. It is a bit more accurate and uses more CPU and about 1 GB of disk. The included 0.5B model stays the default.</p>
         <label>Model size
           <select id="brain-size">
             <option value="medium">Medium (included, more accurate)</option>
             <option value="small">Small (faster, separate download)</option>
+            <option value="smart">Smarter brain (optional, about 1 GB)</option>
           </select>
         </label>
         <p id="brain-note" class="hint"></p>
@@ -99,12 +100,79 @@
         <label>Chat speed <output id="speed-out"></output>
           <input id="speed" type="range" min="1" max="7" step="1" />
         </label>
+        <label class="switch"><input id="lock-position" type="checkbox" /> Lock position</label>
+        <p class="hint">Left click slows, right click speeds up, and a right-drag moves the chat unless position is locked. The speed meter stays on the overlay. Slower and Faster are also in the tray.</p>
         <label>Opacity <output id="opacity-out"></output>
           <input id="opacity" type="range" min="45" max="100" step="1" />
         </label>
         <label>Font size <output id="font-out"></output>
           <input id="font" type="range" min="12" max="22" step="1" />
         </label>
+      </section>
+
+      <section class="card">
+        <h2>Screen activity</h2>
+        <label class="switch"><input id="screen-watch" type="checkbox" /> Watch the screen locally</label>
+        <p class="hint">Every few seconds the app looks at a tiny 64 by 36 thumbnail. It notices motion, cuts, darkness, flashes, and the window title. No picture is uploaded. Chat uses that for lines like a jump scare or a still menu. It pauses while you are idle, slows down when the screen is still, and can skip itself on battery.</p>
+        <label class="switch"><input id="pause-battery" type="checkbox" /> Pause screen watch on battery</label>
+        <label class="switch"><input id="auto-vision" type="checkbox" /> Auto vision (AI mode only, default off)</label>
+        <label>Auto vision cap per hour <output id="vision-out"></output>
+          <input id="vision-cap" type="range" min="1" max="12" step="1" />
+        </label>
+        <p class="hint">Auto vision sends a real screenshot only after a big change, and only while AI mode is on. The hourly cap is strict. Leave it off to stay on the local analyzer.</p>
+      </section>
+
+      <section class="card">
+        <h2>Alerts</h2>
+        <label class="switch"><input id="alerts" type="checkbox" /> Fake donations, subs, bits, gifts, and raids</label>
+        <label>Volume <output id="volume-out"></output>
+          <input id="volume" type="range" min="0" max="100" step="1" />
+        </label>
+        <label>How often
+          <select id="alert-frequency">
+            <option value="rare">Rare</option>
+            <option value="normal">Normal</option>
+            <option value="often">Often</option>
+          </select>
+        </label>
+        <label>Sound
+          <select id="alert-sound">
+            <option value="coin">Coin</option>
+            <option value="chime">Chime</option>
+            <option value="arcade">Arcade</option>
+            <option value="horn">Hype horn</option>
+          </select>
+        </label>
+        <label>Currency <input id="currency" type="text" maxlength="4" spellcheck="false" /></label>
+        <label>Minimum amount <input id="alert-min" type="number" min="1" max="500" /></label>
+        <label>Maximum amount <input id="alert-max" type="number" min="1" max="500" /></label>
+        <label class="switch"><input id="alert-tts" type="checkbox" /> Read alerts with Windows speech</label>
+        <div class="actions">
+          <button id="test-alert" type="button">Test donation</button>
+        </div>
+        <p class="hint">Sounds are short tones made in the app. Messages stay kid-friendly. A donation also bumps the viewer count and gets a thank-you in chat.</p>
+      </section>
+
+      <section class="card">
+        <h2>Real chat</h2>
+        <label>Twitch channel <input id="twitch" type="text" maxlength="25" spellcheck="false" placeholder="channel name" /></label>
+        <label>YouTube live URL, handle, or video id <input id="youtube" type="text" maxlength="200" spellcheck="false" /></label>
+        <label>YouTube Data API key (optional)
+          <input id="youtube-key" type="password" autocomplete="off" spellcheck="false" />
+        </label>
+        <label>Mix
+          <select id="chat-mix">
+            <option value="mixed">Real + fake</option>
+            <option value="real">Real only</option>
+          </select>
+        </label>
+        <label class="switch"><input id="hide-words" type="checkbox" /> Hide bad words</label>
+        <div class="actions">
+          <button id="live-connect" type="button">Connect</button>
+          <button id="live-disconnect" type="button">Disconnect</button>
+        </div>
+        <p id="live-status" class="hint"></p>
+        <p class="hint">Twitch uses anonymous IRC, so no login. YouTube tries the public live chat page first. That unofficial endpoint can break. A Data API key is the stable option and is encrypted on this PC. Offline mode disconnects both. Real only stops the idle fake crowd and fake alerts while a chat is connected. Screen-activity lines and backtick or V reactions still run.</p>
       </section>
 
       <section class="card">
@@ -182,7 +250,7 @@
         <ul>
           <li><span>Left click</span> slower chat</li>
           <li><span>Right click</span> faster chat</li>
-          <li><span>Right-drag</span> move the chat</li>
+          <li><span>Right-drag</span> move the chat, unless position is locked</li>
           <li><span>Corner drag</span> resize</li>
           <li><span>`</span> send the screen</li>
           <li><span>Hold V</span> talk</li>

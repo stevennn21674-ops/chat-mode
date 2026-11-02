@@ -12,6 +12,9 @@ interface TrayHandlers {
   setOffline: (value: boolean) => void
   setOverlayMode: (mode: 'normal' | 'game') => void
   setPaused: (value: boolean) => void
+  slower: () => void
+  faster: () => void
+  setLock: (value: boolean) => void
   openSettings: () => void
   resetPosition: () => void
   status: () => string
@@ -60,6 +63,14 @@ export function createTray(handlers: TrayHandlers): { tray: Tray; render: () => 
           type: 'checkbox',
           checked: settings.overlayMode === 'game',
           click: (item) => handlers.setOverlayMode(item.checked ? 'game' : 'normal')
+        },
+        { label: 'Slower', click: () => handlers.slower() },
+        { label: 'Faster', click: () => handlers.faster() },
+        {
+          label: 'Lock position',
+          type: 'checkbox',
+          checked: settings.lockPosition,
+          click: (item) => handlers.setLock(item.checked)
         },
         {
           label: 'Pause screen capture',

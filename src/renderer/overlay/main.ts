@@ -1,5 +1,6 @@
 import { formatViewerCount } from '@shared/crowd'
-import type { ChatMessage, OverlayState, PointerEventPayload } from '@shared/types'
+import { synthTone } from '@shared/tones'
+import type { AlertBanner, ChatMessage, OverlayState, PointerEventPayload } from '@shared/types'
 
 interface ChatBridge {
   ready(): void
@@ -7,6 +8,7 @@ interface ChatBridge {
   pointer(payload: PointerEventPayload): void
   onMessage(callback: (message: ChatMessage) => void): () => void
   onState(callback: (state: OverlayState) => void): () => void
+  onAlert(callback: (alert: AlertBanner) => void): () => void
 }
 
 declare global {
@@ -27,12 +29,16 @@ const hype = document.querySelector('#hype') as HTMLElement
 const hypeLabel = document.querySelector('#hype-label') as HTMLElement
 const hypeFill = document.querySelector('#hype-fill') as HTMLElement
 const debug = document.querySelector('#debug') as HTMLElement
+const alertBox = document.querySelector('#alert') as HTMLElement
+const alertKicker = document.querySelector('#alert-kicker') as HTMLElement
+const alertMain = document.querySelector('#alert-main') as HTMLElement
+const alertText = document.querySelector('#alert-text') as HTMLElement
 
 let stick = true
-let speedTimer = 0
 let hypeTimer = 0
-let lastFlash = 0
+let alertTimer = 0
 let hovering = false
+let audioCtx: AudioContext | null = null
 
 log.addEventListener('scroll', () => {
   stick = log.scrollHeight - log.scrollTop - log.clientHeight < 48
@@ -47,11 +53,6 @@ function setHover(x: number, y: number): void {
 }
 
 window.addEventListener('mousemove', (event) => setHover(event.clientX, event.clientY))
-document.documentElement.addEventListener('mouseleave', () => {
-  hovering = false
-  window.chat.setIgnoreMouse(true)
-})
-
 panel.addEventListener('pointerdown', (event) => {
   if (event.button === 1) return
   const resize = (event.target as HTMLElement).closest('#resize')
@@ -144,9 +145,9 @@ function append(message: ChatMessage): void {
 }
 
 function eventText(message: ChatMessage): string {
-  if (message.kind === 'donation') {
+  if (message.kind === 'donation' || message.kind === 'bits' || message.kind === 'gift') {
     const amount = message.amount ? ` ${message.amount}` : ''
-    return `${message.username} donated${amount} — ${message.text}`
+    return `${message.username} ${message.kind === 'donation' ? 'donated' : message.kind === 'bits' ? 'cheered' : 'gifted'}${amount} — ${message.text}`
   }
   if (message.kind === 'sub') return `${message.username} ${message.text}`
   if (message.kind === 'raid') {
@@ -182,6 +183,7 @@ function applyState(state: OverlayState): void {
   }
   document.documentElement.style.setProperty('--font-size', `${state.fontSize}px`)
   document.documentElement.style.setProperty('--panel-opacity', String(state.opacity))
+  speed.textContent = `${meter(state.speedLevel)}  ${state.speedLevel}`
   paused.classList.toggle('hidden', !state.capturePaused)
   mic.classList.toggle('hidden', !state.micLive && !state.micNote)
   micLabel.textContent = state.micNote || 'Mic live'
@@ -192,17 +194,45 @@ function applyState(state: OverlayState): void {
     debug.textContent = ''
     debug.classList.add('hidden')
   }
-  if (state.speedFlash !== lastFlash) {
-    lastFlash = state.speedFlash
-    if (state.speedFlash > 0) {
-      speed.textContent = `${meter(state.speedLevel)}  ${state.speedLevel}`
-      speed.classList.remove('hidden')
-      window.clearTimeout(speedTimer)
-      speedTimer = window.setTimeout(() => speed.classList.add('hidden'), 1100)
-    }
+}
+
+function showAlert(alert: AlertBanner): void {
+  const label = alert.kind === 'donation' ? 'Donation' : alert.kind === 'bits' ? 'Bits' : alert.kind === 'gift' ? 'Gift' : alert.kind === 'sub' ? 'Sub' : alert.kind === 'raid' ? 'Raid' : 'Alert'
+  alertKicker.textContent = label
+  alertMain.textContent = `${alert.username}${alert.amount ? ` ${alert.amount}` : ''}`
+  alertText.textContent = alert.text
+  alertBox.classList.remove('hidden')
+  window.clearTimeout(alertTimer)
+  alertTimer = window.setTimeout(() => alertBox.classList.add('hidden'), 5000)
+  if (alert.volume > 0 && (alert.sound === 'coin' || alert.sound === 'chime' || alert.sound === 'arcade' || alert.sound === 'horn')) {
+    playTone(alert.sound, alert.kind, alert.volume)
   }
+  if (alert.speak && 'speechSynthesis' in window) {
+    window.speechSynthesis.cancel()
+    const utter = new SpeechSynthesisUtterance(alert.speak)
+    utter.volume = Math.max(0, Math.min(1, alert.volume))
+    window.speechSynthesis.speak(utter)
+  }
+}
+
+function playTone(pack: AlertBanner['sound'], kind: AlertBanner['kind'], volume: number): void {
+  const bytes = synthTone(pack, kind)
+  const copy = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(copy).set(bytes)
+  const ctx = audioCtx ?? new AudioContext()
+  audioCtx = ctx
+  void ctx.decodeAudioData(copy).then((buffer) => {
+    const source = ctx.createBufferSource()
+    const gain = ctx.createGain()
+    gain.gain.value = Math.max(0, Math.min(1, volume))
+    source.buffer = buffer
+    source.connect(gain)
+    gain.connect(ctx.destination)
+    source.start()
+  }).catch(() => undefined)
 }
 
 window.chat.onMessage(append)
 window.chat.onState(applyState)
+window.chat.onAlert(showAlert)
 window.chat.ready()
