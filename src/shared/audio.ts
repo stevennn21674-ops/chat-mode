@@ -88,6 +88,81 @@ export function downsample(input: Float32Array, inRate: number, outRate: number)
   return out
 }
 
+export function trimSilence(samples: Float32Array, sampleRate: number, threshold = SILENCE_RMS): Float32Array {
+  if (!samples.length || sampleRate <= 0) return samples
+  const frame = Math.max(1, Math.floor(sampleRate * 0.02))
+  const loudAt = (index: number): boolean => {
+    const end = Math.min(samples.length, index + frame)
+    if (end <= index) return false
+    let sum = 0
+    for (let i = index; i < end; i += 1) {
+      const sample = samples[i] ?? 0
+      sum += sample * sample
+    }
+    return Math.sqrt(sum / (end - index)) >= threshold
+  }
+  let start = 0
+  while (start < samples.length && !loudAt(start)) start += frame
+  if (start >= samples.length) return new Float32Array()
+  let end = samples.length
+  while (end - frame > start && !loudAt(end - frame)) end -= frame
+  const from = Math.max(0, start - Math.floor(sampleRate * 0.12))
+  const to = Math.min(samples.length, end + Math.floor(sampleRate * 0.28))
+  return samples.slice(from, to)
+}
+
+export function asFloat32(value: unknown, encoding?: 'f32le' | 'f32'): Float32Array | null {
+  if (value instanceof Float32Array) return value
+  if (encoding === 'f32le') return floatFromBytes(value)
+  if (value instanceof ArrayBuffer) return floatFromBytes(new Uint8Array(value))
+  if (ArrayBuffer.isView(value)) {
+    const view = value as ArrayBufferView
+    if (view instanceof Float32Array) return new Float32Array(view)
+    if (view.byteLength >= 4 && view.byteLength % 4 === 0) return floatFromBytes(new Uint8Array(view.buffer, view.byteOffset, view.byteLength))
+  }
+  if (Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === 'number')) {
+    return Float32Array.from(value)
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    const length = record.length
+    if (typeof length === 'number' && length > 0) {
+      const numbers: number[] = []
+      for (let i = 0; i < length; i += 1) {
+        const sample = record[i]
+        if (typeof sample !== 'number') return null
+        numbers.push(sample)
+      }
+      return Float32Array.from(numbers)
+    }
+  }
+  return null
+}
+
+function floatFromBytes(value: unknown): Float32Array | null {
+  let bytes: Uint8Array | null = null
+  if (value instanceof Uint8Array) bytes = value
+  else if (value instanceof ArrayBuffer) bytes = new Uint8Array(value)
+  else if (ArrayBuffer.isView(value)) {
+    const view = value as ArrayBufferView
+    bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
+  } else if (Array.isArray(value) && value.every((item) => typeof item === 'number')) {
+    bytes = Uint8Array.from(value)
+  } else if (value && typeof value === 'object' && typeof (value as { length?: unknown }).length === 'number') {
+    const length = (value as { length: number }).length
+    const packed = new Uint8Array(length)
+    for (let i = 0; i < length; i += 1) {
+      const sample = (value as Record<number, unknown>)[i]
+      if (typeof sample !== 'number') return null
+      packed[i] = sample
+    }
+    bytes = packed
+  }
+  if (!bytes || bytes.byteLength < 4 || bytes.byteLength % 4 !== 0) return null
+  const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+  return new Float32Array(copy)
+}
+
 export function encodeWavPcm16(samples: Float32Array, sampleRate: number): Buffer {
   const dataSize = samples.length * 2
   const buffer = Buffer.alloc(44 + dataSize)

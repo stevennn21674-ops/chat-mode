@@ -51,6 +51,28 @@ describe('screen activity', () => {
     expect(allowAutoVision({ aiMode: true, autoVision: false, offline: false, big: true, usedThisHour: 0, cap: 6 })).toBe(false)
     expect(allowAutoVision({ aiMode: true, autoVision: true, offline: false, big: true, usedThisHour: 6, cap: 6 })).toBe(false)
     expect(allowAutoVision({ aiMode: true, autoVision: true, offline: false, big: true, usedThisHour: 1, cap: 6 })).toBe(true)
+    expect(allowAutoVision({
+      aiMode: true,
+      autoVision: true,
+      offline: false,
+      big: true,
+      usedThisHour: 1,
+      cap: 6,
+      serviceCalls: 19,
+      serviceCap: 20,
+      reserveForVoice: true
+    })).toBe(false)
+    expect(allowAutoVision({
+      aiMode: true,
+      autoVision: true,
+      offline: false,
+      big: true,
+      usedThisHour: 0,
+      cap: 6,
+      serviceCalls: 2,
+      serviceCap: 20,
+      reserveForVoice: true
+    })).toBe(true)
     expect(allowAutoVision({ aiMode: false, autoVision: true, offline: false, big: true, usedThisHour: 0, cap: 6 })).toBe(false)
   })
 })

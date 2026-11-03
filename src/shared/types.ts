@@ -44,6 +44,10 @@ export interface AppSettings {
   baseUrl: string
   aiMode: boolean
   showDebugTranscript: boolean
+  showHeard: boolean
+  autoScroll: boolean
+  lookAtScreenWhenTalking: boolean
+  readScreenText: boolean
   offlineMode: boolean
   overlayMode: 'normal' | 'game'
   localBrain: boolean
@@ -88,6 +92,10 @@ export interface OverlayState {
   capturePaused: boolean
   speedFlash: number
   micNote: string | null
+  heardText: string | null
+  micFault: string | null
+  micLevel: number
+  autoScroll: boolean
   viewerCount: number
   debugText: string | null
 }
@@ -123,6 +131,8 @@ export interface SettingsView extends AppSettings {
   localBrainProgress: number | null
   localBrainNote: string
   localBrainButton: string
+  diskUsed: string
+  ocrNote: string
   youtubeApiKey: string
   hasYoutubeKey: boolean
   liveStatus: string

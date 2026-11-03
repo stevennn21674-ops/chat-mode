@@ -18,9 +18,9 @@ The chat is synthetic. It is not connected to a real stream.
 
 Ctrl, Alt, and the Windows key together with V do not open the mic, so paste shortcuts stay quiet. A plain V does, including while you are typing.
 
-Clicks outside the chat panel go to whatever is underneath. The panel itself captures the mouse only while the pointer is over it. Game mode re-asserts the topmost window, and the app writes the click-through flag again after each re-assert so the chat still receives clicks.
+The wheel over the chat scrolls the lines. Auto-scroll follows the newest message until you scroll up; scrolling back to the bottom, or **Jump to latest**, turns it back on. **Auto-scroll chat** in Settings turns that behavior off. Clicks outside the chat panel go to whatever is underneath. The panel itself captures the mouse only while the pointer is over it. Left and right clicks still change speed, and a right-drag still moves the window. Game mode re-asserts the topmost window, and the app writes the click-through flag again after each re-assert so the chat still receives clicks.
 
-The speed meter stays in the header. Settings has the same speed slider, **Lock position**, and the tray has **Slower** and **Faster**. A locked chat still changes speed on click, and it does not move. Pressing the backtick key blinks the tray icon and sets the tray tooltip to **reading the screen**. **Mic live** shows while V is held.
+The speed meter stays in the header. Settings has the same speed slider, **Lock position**, and the tray has **Slower** and **Faster**. A locked chat still changes speed on click, and it does not move. Pressing the backtick key blinks the tray icon and sets the tray tooltip to **reading the screen**. **Mic live** shows while V is held, with a level meter. After you let go, the overlay shows **heard:** and the words for a few seconds when **Show what I said** is on (the default). If the mic or the speech model fails, the overlay says **mic not working:** and the reason. Settings has **Test mic**, which records about 3 seconds and prints the transcript. The same events are appended to `voice-debug.log` in the app data folder. A short tail is kept after you release V so the last word is not cut off. The speech model stays the tiny English one.
 
 Position, size, speed, opacity, font size, device choice, and the other toggles are saved and restored the next time the app starts.
 
@@ -28,7 +28,19 @@ The header shows an eye icon and a viewer count. It starts at a plausible number
 
 Simulated viewers each have an engagement level. A static screen, a long silence, or repetitive lines make them bored: chat slows down, some of them say things like `lol bored`, `gn`, or `brb`, and the count drops as they go. Talking, a backtick read, or a big screen change brings viewers back under new random usernames.
 
-Some viewers are moderators and show a green sword. Hold V and say `ban <name>`, `timeout <name>`, `mods ban him`, `ban the last guy`, `ban the spammer`, or `ban everyone` / `ban all the bots`. A mod answers in chat, that person's messages are removed, a `<name> has been banned` line appears, the viewer count drops, and that viewer does not speak again. Names can be partial (`pixel` for `xX_PixelFox99`), missing a letter, or a whisper misspelling. This works with AI mode on or off and does not call the comment service. Settings has **Show debug transcript**, which prints the last heard line on the overlay. The same line and the parsed command are appended to `voice-debug.log` in the app data folder.
+Some viewers are moderators and show a green sword. Hold V and say `ban <name>`, `timeout <name>`, `mods ban him`, `ban the last guy`, `ban the spammer`, or `ban everyone` / `ban all the bots`. A mod answers in chat, that person's messages are removed, a `<name> has been banned` line appears, the viewer count drops, and that viewer does not speak again. Names can be partial (`pixel` for `xX_PixelFox99`), missing a letter, or a whisper misspelling. This works with AI mode on or off and does not call the comment service. **Show what I said** is on by default and prints `heard:` plus the line. The parsed ban command is also appended to `voice-debug.log`.
+
+## Screen vision
+
+**Look at screen when I talk** is on by default.
+
+With AI mode on, releasing V captures one downscaled JPEG (about 512 pixels on the long side, quality 60) and sends it with the transcript in that single call. Backtick still sends its own capture. Offline mode and Local brain cannot truly read what is drawn on the screen. There is no vision-language model in this release: a small GGUF captioner needs a separate vision projector and a vision build of llama.cpp, and the weights are hundreds of megabytes, so it was not shipped.
+
+What offline chat does use:
+
+- The local activity sampler: motion, a still menu, darkness, a flash or cut, and the window title when Windows provides one.
+- Dominant colors, brightness, a rough menu-versus-gameplay guess, and a warm-color hint. That hint is not face recognition.
+- **Read on-screen text (OCR)**, on by default. The English LSTM data is about 1.9 MB and is downloaded into the app data folder the first time it is needed. It is not in the installer. OCR runs on a cropped, downscaled frame only when you release V or press backtick and the picture changed. It is skipped when an earlier read of the same picture is still fresh. Recognized words (menus, subtitles, HUD labels, names, and numbers such as health or score) are given to the viewers, who can quote them. OCR misses a lot of game text. It is not a description of the scene.
 
 ## Screen activity
 
@@ -60,9 +72,9 @@ With AI mode off and a connection available, a few names or game titles can be l
 
 **AI mode** is a checkbox in Settings and a tray item. On uses the comment service below, with the key and model you set and the same eco limits as before. The request also includes a short note of recent sounds, names, and what seems to be happening. That does not add another call. Off does not send any chat request: messages are built on this PC. The local chat tracks words from the mic, computer audio, and window titles, and it answers questions, greetings, scares, wins, and losses in different voices (hype, lurker, light troll, mod, backseat, questioner). Lines can quote you, misspell, stretch letters, or stack letters. Echoed words go through the kid-friendly filter. A backtick capture is not sent to a vision model while AI mode is off. Local chat only sees cheap signals: how much the picture changed, the main colors, and the window title when the system provides one.
 
-**Local brain** is a separate checkbox, on by default. With AI mode off and the model file present, viewer lines are written by a small on-device model instead of the built-in templates. It sees the same kind of context the cloud path uses: the mic transcript, the computer-audio story, the window title, custom viewer personalities, and whether the room is bored. Several viewers are written in one pass. It runs at low priority, caps the reply, and waits about 6 to 10 seconds between passes. **Brain speed** is light, normal, or heavy. If the CPU is already busy, or the model is missing, slow, or errors, chat falls back to the built-in lines. Ban commands still use the built-in parser. The kid-friendly filter still applies. The model is smaller and less accurate than the cloud model.
+**Local brain** is a separate checkbox, on by default. With AI mode off and a downloaded model file present, viewer lines are written by a small on-device model instead of the built-in templates. It sees the mic transcript, on-screen text, colors and motion, the window title, custom viewer personalities, and whether the room is bored. It does not see the picture itself. Several viewers are written in one pass. It runs at low priority, caps the reply, and waits between ordinary passes. A voice line does not wait on that timer. **Brain speed** is light, normal, or heavy. If the CPU is already busy, or the model is missing, slow, or errors, chat falls back to the built-in lines, and a voice line still gets a reply. Ban commands still use the built-in parser. The kid-friendly filter still applies. The model is smaller and less accurate than the cloud model.
 
-The included model is Qwen2.5-0.5B-Instruct Q8 (about 644 MB). A faster Q4 build of the same 0.5B model (about 469 MB) is the small size and is not in the installer. **Smarter brain** is an optional download of Qwen2.5-1.5B-Instruct Q4_K_M (about 1.04 GB). It is not in the installer, so the Windows build stays under the size limit. It is a bit more accurate than the 0.5B model and uses more CPU and RAM. It is still well behind the cloud model. Settings asks before downloading and shows the size. The download can resume, and **Delete model** removes the copies from this PC. After a file is on disk, local brain does not use the network, including in offline mode. The Windows build also ships a CPU build of llama.cpp beside the app, not inside the asar archive. The bundled model is not inside the asar archive either.
+No language model is inside the installer. The first time Local brain is turned on, Settings asks before downloading. **Q4** is Qwen2.5-0.5B-Instruct Q4_K_M, about 469 MB (about 490 MB if you count decimal megabytes). **Q8** is the same model at Q8_0, about 644 MB. **Smarter brain** is an optional download of Qwen2.5-1.5B-Instruct Q4_K_M, about 1.04 GB. The download can resume, and **Delete model** removes the copies from this PC. **Disk used by Chat Mode** counts those files plus the on-screen text data. **Delete all downloaded data** removes the models, the text file, and the lookup cache. Your settings and API key stay. After a file is on disk, local brain does not use the network, including in offline mode. The Windows build ships a CPU build of llama.cpp beside the app, not inside the asar archive, and not a model file.
 
 With AI mode off, local brain is the default when a model file is present. The prompt includes the mic, computer audio, window title, local screen activity, real chat if it is connected, viewer notes, recent lines, and a short example of stream chat. Lines that repeat recent chat, run too long, or fail the kid-friendly filter are dropped. If the model is missing, busy, or slow, the built-in lines answer from the same cues: questions, names, a running joke, and the screen activity. That rule layer is more on-topic than the old random templates, and it is still not as accurate as the cloud model.
 
@@ -87,7 +99,7 @@ Eco mode is on by default:
 - The frame is about 512 pixels on the long side, JPEG quality 60.
 - Each call asks for a short batch and a low token limit. In eco mode that batch is spaced out, and spaced further when you have not used the computer for about 90 seconds or you are on battery.
 - A calls-per-hour cap defaults to 20 and is shown as **Calls this hour**.
-- Holding V only asks the service after you release the key and the transcript is not empty. Letting go of V does not capture the screen.
+- Holding V asks the service once, after you release the key, when the transcript is not empty and the hourly cap still has room. **Look at screen when I talk** (on by default) attaches one 512px JPEG from that moment to the same call. It does not make a second call. That call is counted, and auto vision leaves the last hourly slot free while the toggle is on. If the cap is already full, viewers still answer on this PC and the picture is not uploaded.
 - Computer audio is included in those same requests. It never starts one by itself.
 
 If you leave the key blank, the app uses a key sealed at build time when one was provided. A build with no key still runs and stays on local chat until you enter one.
@@ -117,7 +129,7 @@ On Windows that downloads the speech executable and model into `resources/whispe
 
 ## Windows build
 
-The GitHub Actions workflow [Build Windows](.github/workflows/build-windows.yml) runs on `windows-latest` with Node 22.23.4. It caches npm, the speech-model download, and the bundled local-brain model, runs the tests, and builds without a repository secret. The local model is downloaded in that job and packed next to the app. It is not committed to the repo. It uploads:
+The GitHub Actions workflow [Build Windows](.github/workflows/build-windows.yml) runs on `windows-latest` with Node 22.23.4. It caches npm, the speech-model download, and the llama.cpp runtime, runs the tests, and builds without a repository secret. The Qwen model is not downloaded and is not packed into the app. The speech model is tiny English, about 75 MB, plus the whisper binary. The llama.cpp runtime is about 25 MB. The OCR engine kept in the app is one SIMD build and one non-SIMD fallback, a few megabytes, not the full set of WASM files. The English OCR data stays out of the installer. The NSIS file is `ChatMode-0.7.0-x64.exe`. It uploads:
 
 - an NSIS installer (`.exe`)
 - a portable `.exe`, also zipped
@@ -141,7 +153,9 @@ These were not verified on a real Windows desktop in this environment. The code 
 - Hold-V bans, the debug transcript line, custom viewers, Wikipedia lookups, and the offline tray tooltip on a real Windows desktop.
 - Screen capture while a game is exclusive fullscreen. A black screen image falls back to a window thumbnail. That fallback was not exercised on Windows here.
 - The global V hook (`uiohook-napi`), the backtick capture key, and the pause hotkey while a game is focused.
-- Microphone capture, device selection, and on-device transcription.
+- Microphone capture, the level meter, device selection, the test-mic button, and on-device transcription. The hidden voice window resumes its audio context, and clips are sent as raw sample bytes because a typed array can arrive empty in the main process.
+- On-screen text OCR, including the 1.9 MB language download and whether Windows screen capture includes the overlay.
+- Whether a voice line plus one screenshot stays inside the hourly cap on a real desktop. Auto vision is supposed to leave the last slot for that call.
 - System-audio loopback (`getDisplayMedia` with `audio: 'loopback'`). It is a Windows feature. Silent audio is ignored before transcription.
 - Whether Windows screen capture omits the overlay. The window is marked to be excluded. On the Linux desktop used during development, capture itself worked, and the overlay was still visible in the image.
 - Click-through, right-drag moving, and lock position over a real Windows desktop, including Game mode. The gesture decisions are unit-tested. The Windows topmost flag and `uiohook` mouse hook were not exercised here.
@@ -152,7 +166,7 @@ These were not verified on a real Windows desktop in this environment. The code 
 - The installer or portable exe themselves.
 - Launch at startup. The setting is stored, and it is applied only in a packaged build.
 - The viewer-count header, green sword badge, AI mode checkbox, and local brain settings on a real Windows desktop.
-- The bundled llama.cpp runtime: loading Qwen2.5-0.5B-Instruct, low-priority CPU use, brain speed, the busy-CPU fallback, delete, and a resumed download. Those paths were not run on Windows here.
+- The llama.cpp runtime after you download a model: loading Qwen2.5-0.5B-Instruct, low-priority CPU use, brain speed, the busy-CPU fallback, delete, and a resumed download. Those paths were not run on Windows here. No vision model is included.
 - The foreground window title used by offline chat. It depends on the Windows window list and can be missing.
 
 Other limits:

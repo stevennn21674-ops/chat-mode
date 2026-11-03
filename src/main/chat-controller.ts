@@ -1,6 +1,6 @@
 import { alertIntervalMs, alertReaction, allowSyntheticChat, rollAlert, sampleDonation, speechLine, type AlertDraft } from '../shared/alerts'
-import { requestCompletion } from '../shared/ai-client'
-import { batchPlan, nextWaitMs, recordCall, shouldCallModel, underCallCap, type CallUsage } from '../shared/budget'
+import { requestCompletion, type CompletionParams, type CompletionResult } from '../shared/ai-client'
+import { batchPlan, callsInWindow, nextWaitMs, recordCall, shouldCallModel, underCallCap, type CallUsage } from '../shared/budget'
 import {
   banViewer,
   bumpViewers,
@@ -17,7 +17,10 @@ import { badgeOf, customPromptBlock, type CustomCrowd } from '../shared/custom-v
 import { demoModelJson } from '../shared/demo'
 import { displayChatText, isKidSafe } from '../shared/filter'
 import type { LiveItem } from '../shared/live'
-import { activityLines, allowAutoVision, type ActivityEvent } from '../shared/screen-activity'
+import { activityLines, allowAutoVision, detectGame, type ActivityEvent } from '../shared/screen-activity'
+import { cleanOcrText, groundedLines } from '../shared/ocr-text'
+import type { SceneCue } from '../shared/scene-cues'
+import { buildVoiceReactions, sceneCaption, scheduleVoiceReactions, silenceLines, type VoiceScene } from '../shared/voice-react'
 import { usableTranscript } from '../shared/speech'
 import { frameUnchanged } from '../shared/frame-diff'
 import { makeFallbackMessages } from '../shared/fallback'
@@ -42,7 +45,9 @@ interface ControllerDeps {
   updateSettings: (patch: { speedLevel?: number; capturePaused?: boolean }) => void
   sendMessage: (message: ChatMessage) => void
   config: () => ServiceConfig
-  capture: () => Promise<{ jpegBase64: string; hash: string; colors?: string[]; title?: string | null } | null>
+  capture: () => Promise<{ jpegBase64: string; hash: string; colors?: string[]; title?: string | null; scene?: SceneCue } | null>
+  ocr?: (jpegBase64: string, hash: string) => Promise<string>
+  complete?: (params: CompletionParams) => Promise<CompletionResult>
   pcAudio: () => Promise<{ text: string; loud: boolean }>
   usage: () => CallUsage
   setUsage: (usage: CallUsage) => void
@@ -79,6 +84,18 @@ export class ChatController {
   private speedFlash = 0
   private micNote: string | null = null
   private micTimer: NodeJS.Timeout | null = null
+  private heardText: string | null = null
+  private heardTimer: NodeJS.Timeout | null = null
+  private micFault: string | null = null
+  private faultTimer: NodeJS.Timeout | null = null
+  private micLevel = 0
+  private voiceFrame: { jpegBase64: string; hash: string; colors?: string[]; title?: string | null; scene?: SceneCue } | null = null
+  private voiceFrameWait: Promise<void> | null = null
+  private ocrTask: Promise<string> | null = null
+  private screenText = ''
+  private lastOcrHash = ''
+  private lastSpeechAt = Date.now()
+  private lastPromptAt = Date.now()
   private abort: AbortController | null = null
   private lastHash: string | null = null
   private onState: (state: OverlayState) => void = () => undefined
@@ -121,6 +138,8 @@ export class ChatController {
     if (this.pump) clearInterval(this.pump)
     if (this.timer) clearInterval(this.timer)
     if (this.micTimer) clearTimeout(this.micTimer)
+    if (this.heardTimer) clearTimeout(this.heardTimer)
+    if (this.faultTimer) clearTimeout(this.faultTimer)
   }
 
   snapshot(): OverlayState {
@@ -134,6 +153,10 @@ export class ChatController {
       capturePaused: settings.capturePaused,
       speedFlash: this.speedFlash,
       micNote: this.micNote,
+      heardText: settings.showHeard ? this.heardText : null,
+      micFault: this.micFault,
+      micLevel: this.micLive ? this.micLevel : 0,
+      autoScroll: settings.autoScroll,
       viewerCount: this.crowd.count,
       debugText: settings.showDebugTranscript ? this.lastHeard : null
     }
@@ -156,15 +179,50 @@ export class ChatController {
     }, 2400)
   }
 
-  noteSpeech(text: string): void {
+  setMicLevel(level: number): void {
+    const next = Math.max(0, Math.min(1, level))
+    if (!this.micLive && next === 0) return
+    if (Math.abs(next - this.micLevel) < 0.04 && next !== 0) return
+    this.micLevel = next
+    this.onState(this.snapshot())
+  }
+
+  setMicFault(reason: string): void {
+    const text = reason.startsWith('mic not working:') ? reason : `mic not working: ${reason}`
+    this.micFault = text.slice(0, 180)
+    this.deps.logVoice?.(this.micFault)
+    this.publish()
+    if (this.faultTimer) clearTimeout(this.faultTimer)
+    this.faultTimer = setTimeout(() => {
+      this.micFault = null
+      this.publish()
+    }, 6500)
+  }
+
+  async prepareVoiceScreen(): Promise<void> {
+    const run = this.captureForVoice()
+    this.voiceFrameWait = run
+    try {
+      await run
+    } finally {
+      if (this.voiceFrameWait === run) this.voiceFrameWait = null
+    }
+  }
+
+  async noteSpeech(text: string): Promise<void> {
     const raw = text.trim().slice(0, 400)
-    if (raw.length < 2) return
+    if (raw.length < 2) {
+      this.setMicFault('clip too short')
+      return
+    }
     const now = Date.now()
     this.lastHeard = raw.slice(0, 180)
+    this.lastSpeechAt = now
     noteText(this.memory, raw, now)
     ingest(this.knowledge, raw, 'mic', now)
     const command = parseModCommand(raw)
     this.deps.logVoice?.(`${raw} => ${command ? formatModCommand(command) : 'none'}`)
+    this.showHeard(raw)
     if (command) {
       this.enforce(command)
       this.publish()
@@ -172,14 +230,289 @@ export class ChatController {
     }
     markTalking(this.crowd, now)
     const clean = usableTranscript(raw)
-    const remembered = clean || (!this.deps.getSettings().aiMode ? echoWords([raw]).join(' ') : '')
-    if (remembered) {
-      this.transcripts.push(remembered)
-      if (this.transcripts.length > 4) this.transcripts.shift()
-      this.voicePending = true
+    const remembered = clean || echoWords([raw]).join(' ')
+    if (!remembered) {
+      this.setMicFault('could not use that speech')
+      return
     }
+    const earlier = [...this.transcripts]
+    this.transcripts.push(remembered)
+    if (this.transcripts.length > 8) this.transcripts.shift()
+    if (this.voiceFrameWait) await Promise.race([this.voiceFrameWait, delay(500)])
+    if (this.ocrTask) {
+      const heard = await Promise.race([this.ocrTask, delay(200).then(() => '')])
+      const cleaned = cleanOcrText(heard)
+      if (cleaned) this.screenText = cleaned
+    }
+    this.burstVoice(remembered, earlier)
     void this.maybeLookup()
+    void this.enrichVoice()
     this.publish()
+  }
+
+  private showHeard(raw: string): void {
+    if (!this.deps.getSettings().showHeard) {
+      this.heardText = null
+      return
+    }
+    const safe = raw.replace(/\s+/g, ' ').trim().slice(0, 160)
+    if (!safe || !isKidSafe(safe)) return
+    this.heardText = `heard: ${safe}`
+    if (this.heardTimer) clearTimeout(this.heardTimer)
+    this.heardTimer = setTimeout(() => {
+      this.heardText = null
+      this.publish()
+    }, 6000)
+    this.publish()
+  }
+
+  private async captureForVoice(): Promise<void> {
+    const settings = this.deps.getSettings()
+    if (!settings.lookAtScreenWhenTalking || settings.capturePaused) {
+      this.voiceFrame = null
+      return
+    }
+    try {
+      const frame = await this.deps.capture()
+      if (!frame) return
+      this.voiceFrame = frame
+      this.noteTitle(frame.title)
+      if (frame.hash) this.lastHash = frame.hash
+      if (!settings.readScreenText || !this.deps.ocr || !frame.hash || frame.hash === this.lastOcrHash) return
+      const hash = frame.hash
+      this.ocrTask = this.deps.ocr(frame.jpegBase64, hash).then((text) => {
+        const cleaned = cleanOcrText(text)
+        if (cleaned) {
+          this.lastOcrHash = hash
+          this.applyOcr(cleaned)
+        }
+        return cleaned
+      }).catch(() => '')
+    } catch {
+      this.deps.log('voice screen capture failed')
+    }
+  }
+
+  private voiceScene(): VoiceScene {
+    const frame = this.voiceFrame
+    const activity = this.activity
+    const title = frame?.title || activity?.title || this.windowTitle || null
+    const game = activity?.game || detectGame(title)
+    const kind: VoiceScene['kind'] = activity
+      ? activity.state === 'loading'
+        ? 'loading'
+        : activity.state === 'idle'
+          ? 'menu'
+          : activity.state === 'dark'
+            ? 'dark'
+            : activity.state === 'scare'
+              ? 'cut'
+              : 'gameplay'
+      : frame?.scene?.uiLikely
+        ? 'menu'
+        : frame?.scene?.brightness === 'dark'
+          ? 'dark'
+          : 'unknown'
+    const motion: VoiceScene['motion'] = activity
+      ? activity.state === 'action' || activity.state === 'scare'
+        ? 'fast'
+        : activity.state === 'exploring'
+          ? 'moving'
+          : 'still'
+      : 'still'
+    const scene: VoiceScene = {
+      title,
+      game,
+      colors: frame?.colors ?? [],
+      kind,
+      motion,
+      ocr: this.screenText,
+      textLike: Boolean(frame?.scene?.textLike || this.screenText),
+      warm: Boolean(frame?.scene?.warm)
+    }
+    return scene
+  }
+
+  private burstVoice(transcript: string, earlier: string[]): void {
+    const settings = this.deps.getSettings()
+    const cpu = this.deps.brain?.cpu() ?? null
+    const busyCpu = cpu !== null && cpu >= paceFor(settings.brainSpeed).cpuSkip
+    const custom = (this.deps.customCrowd?.().viewers ?? []).filter((viewer) => viewer.active && !isBanned(this.crowd, viewer.username))
+    const scene = settings.lookAtScreenWhenTalking ? this.voiceScene() : null
+    const messages = buildVoiceReactions({
+      transcript,
+      earlier,
+      scene,
+      rng: Math.random,
+      avoid: new Set(this.avoid.map((name) => name.toLowerCase())),
+      roster: this.crowd.viewers
+        .filter((viewer) => !isBanned(this.crowd, viewer.name))
+        .map((viewer) => ({ name: viewer.name, badge: viewer.badge, color: viewer.color })),
+      custom,
+      now: Date.now(),
+      busyCpu
+    })
+    this.pushPending(scheduleVoiceReactions(messages, Date.now()), true)
+  }
+
+  private applyOcr(text: string): void {
+    this.screenText = text
+    const now = Date.now()
+    noteText(this.memory, text, now)
+    ingest(this.knowledge, text, 'screen', now)
+    if (now - this.lastSpeechAt > 20_000 && !this.capturePending) return
+    const scene = this.voiceScene()
+    const lines = groundedLines({ ocr: scene.ocr, colors: scene.colors, game: scene.game, kind: scene.kind }).filter(
+      (line) => !this.pending.some((item) => item.message.text.toLowerCase() === line.toLowerCase())
+    )
+    if (!lines.length) return
+    const avoid = new Set(this.avoid.map((name) => name.toLowerCase()))
+    const messages = lines.slice(0, 2).map((line, index) => {
+      const name = makeUsername(Math.random, avoid)
+      avoid.add(name.toLowerCase())
+      return {
+        id: `vox-${now}-ocr${index}`,
+        username: name,
+        badge: null,
+        color: colorFor(name),
+        text: line,
+        kind: 'chat' as const
+      }
+    })
+    this.pushPending(messages.map((message, index) => ({ at: now + 500 + index * 900, message })), true)
+    this.publish()
+  }
+
+  private async enrichVoice(): Promise<void> {
+    if (!this.alive || this.busy || this.brainBusy) return
+    const settings = this.deps.getSettings()
+    const demo = process.env.CHATMODE_DEMO === '1'
+    const scene = this.voiceScene()
+    if (!this.deps.offline?.() && chatUsesService(settings.aiMode, demo)) {
+      const config = this.deps.config()
+      const can = demo || canReachService(settings, config)
+      const under = underCallCap(this.deps.usage(), settings.maxCallsPerHour, Date.now())
+      if (!can || !under) return
+      this.busy = true
+      this.capturePending = false
+      try {
+        const image = settings.lookAtScreenWhenTalking && !settings.capturePaused ? this.voiceFrame?.jpegBase64 ?? null : null
+        const output = await produceReactions(
+          {
+            reason: 'voice',
+            screenEnabled: settings.screenReaction,
+            capturePaused: settings.capturePaused,
+            voiceEnabled: true,
+            proxyUrl: settings.proxyUrl,
+            endpoint: config.endpoint,
+            apiKey: config.apiKey,
+            proxyToken: settings.proxyToken,
+            model: config.model,
+            imageBase64: image,
+            transcripts: [...this.transcripts],
+            pcAudio: [...this.pcLines],
+            recentLines: [...this.recentLines],
+            avoidUsernames: [...this.avoid],
+            context: [compactContext(this.knowledge, Date.now()), sceneCaption(scene) ? `Local screen cues: ${sceneCaption(scene)}` : ''].filter(Boolean).join('\n'),
+            customBlock: customPromptBlock(this.deps.customCrowd?.().viewers ?? [], this.deps.customCrowd?.().randomNames ?? []),
+            speedLevel: settings.speedLevel,
+            now: Date.now(),
+            batchCount: 5,
+            maxTokens: 320,
+            backoffMs: 0,
+            voiceTurn: true,
+            seenText: this.screenText
+          },
+          {
+            rng: Math.random,
+            complete: (params) => {
+              if (demo) return Promise.resolve({ ok: true, content: demoModelJson() })
+              if (this.deps.complete) return this.deps.complete(params)
+              return requestCompletion(params)
+            }
+          }
+        )
+        if (!this.alive) return
+        if (output.source === 'model') {
+          this.deps.setUsage(recordCall(this.deps.usage(), Date.now()))
+          const lines = output.scheduled.map((item) => item.message).filter((message) => message.kind === 'chat')
+          if (lines.length) this.adoptModelLines(lines)
+        }
+      } catch {
+        this.deps.log('voice reaction failed')
+      } finally {
+        this.busy = false
+        this.publish()
+      }
+      return
+    }
+    if (!this.holdBrain(settings)) return
+    const cpu = this.deps.brain?.cpu() ?? null
+    const busyCpu = cpu !== null && cpu >= paceFor(settings.brainSpeed).cpuSkip
+    if (busyCpu || !this.deps.brain?.ready()) return
+    const decision = brainDecision({
+      enabled: true,
+      ready: true,
+      cpuPercent: cpu,
+      lastAt: this.brainAt,
+      now: Date.now(),
+      pace: paceFor(settings.brainSpeed),
+      force: true
+    })
+    if (decision !== 'run') return
+    this.brainBusy = true
+    this.brainAt = Date.now()
+    try {
+      const messages = await this.deps.brain.generate(this.brainTurn(scene.title))
+      if (!this.alive || !this.holdBrain(this.deps.getSettings())) return
+      const polished = messages?.length ? polishBrainLines(messages, this.recentLines, this.allowedBlob()) : []
+      if (polished.length) this.adoptModelLines(polished)
+    } catch {
+      this.deps.log('voice brain failed')
+    } finally {
+      this.brainBusy = false
+      this.publish()
+    }
+  }
+
+  private adoptModelLines(lines: ChatMessage[]): void {
+    const now = Date.now()
+    const future = this.pending.filter((item) => item.message.id.startsWith('vox-') && item.at > now + 1400)
+    let used = 0
+    for (const item of future) {
+      const line = lines[used]
+      if (!line) break
+      used += 1
+      item.message = { ...item.message, username: line.username, badge: line.badge, color: line.color, text: line.text }
+    }
+    const extra = lines.slice(used, used + 3)
+    extra.forEach((message, index) => {
+      this.pending.push({ at: now + 1600 + index * 1600, message: { ...message, id: `vox-${now}-m${index}` } })
+    })
+    this.pending.sort((a, b) => a.at - b.at)
+    this.trimPending(true)
+  }
+
+  private maybePrompt(): void {
+    if (!this.allowFake() || this.micLive) return
+    const now = Date.now()
+    if (now - this.lastSpeechAt < 55_000 || now - this.lastPromptAt < 70_000 || this.pending.length > 4) return
+    const game = this.activity?.game ?? detectGame(this.windowTitle)
+    const avoid = new Set(this.avoid.map((name) => name.toLowerCase()))
+    const messages = silenceLines(game).slice(0, 2).map((text, index) => {
+      const username = makeUsername(Math.random, avoid)
+      avoid.add(username.toLowerCase())
+      return {
+        id: `prompt-${now}-${index}`,
+        username,
+        badge: index === 0 ? ('mod' as const) : null,
+        color: colorFor(username),
+        text,
+        kind: 'chat' as const
+      }
+    })
+    this.pushPending(scheduleMessages(messages, this.deps.getSettings().speedLevel, now), false)
+    this.lastPromptAt = now
   }
 
   async listenAmbient(): Promise<void> {
@@ -311,7 +644,10 @@ export class ChatController {
       offline: this.deps.offline?.() ?? false,
       big: true,
       usedThisHour: this.autoShots.length,
-      cap: settings.autoVisionPerHour
+      cap: settings.autoVisionPerHour,
+      serviceCalls: callsInWindow(this.deps.usage(), now),
+      serviceCap: settings.maxCallsPerHour,
+      reserveForVoice: settings.lookAtScreenWhenTalking && settings.voiceEnabled
     })) return
     this.autoShots.push(now)
     this.capturePending = true
@@ -391,9 +727,21 @@ export class ChatController {
   private enqueue(messages: ChatMessage[], spreadMs = 0): void {
     const now = Date.now()
     const scheduled = scheduleMessages(messages, this.deps.getSettings().speedLevel, now)
-    this.pending.push(...(spreadMs > 0 ? coverInterval(scheduled, now, spreadMs) : scheduled))
+    this.pushPending(spreadMs > 0 ? coverInterval(scheduled, now, spreadMs) : scheduled, false)
+  }
+
+  private pushPending(items: ScheduledMessage[], voice: boolean): void {
+    this.pending.push(...items)
     this.pending.sort((a, b) => a.at - b.at)
-    if (this.pending.length > 16) this.pending.length = 16
+    this.trimPending(voice)
+  }
+
+  private trimPending(voice: boolean): void {
+    const cap = voice ? 24 : 16
+    while (this.pending.length > cap) {
+      const drop = voice ? this.pending.findIndex((item) => !item.message.id.startsWith('vox-')) : 0
+      this.pending.splice(drop < 0 ? 0 : drop, 1)
+    }
   }
 
   private localBatch(count: number, avoid: Set<string>, screen: ScreenCue | null): ChatMessage[] {
@@ -430,6 +778,7 @@ export class ChatController {
       fact: [...this.facts.values()].at(-1),
       knowledgeLine: referenceLine(this.knowledge, Math.random) ?? undefined,
       now: Date.now(),
+      screenText: this.screenText,
       activity:
         this.activity && Date.now() - this.activity.at < 12_000
           ? { state: this.activity.state, game: this.activity.game, at: this.activity.at }
@@ -645,6 +994,7 @@ export class ChatController {
     const settings = this.deps.getSettings()
     if (!settings.enabled) return
     this.maybeAlert(Date.now())
+    this.maybePrompt()
     this.advanceCrowd()
     const slots = chatSlots(this.crowd)
     const wantVoice = this.voicePending
@@ -746,7 +1096,9 @@ export class ChatController {
       rng: Math.random,
       activity: this.activity?.detail ?? '',
       liveLines: this.deps.liveLines?.() ?? this.recentLines.slice(-4),
-      joke: this.memory.joke
+      joke: this.memory.joke,
+      screenText: this.screenText,
+      sceneCaption: sceneCaption(this.voiceScene())
     }
   }
 
@@ -805,6 +1157,7 @@ export class ChatController {
           noteScreen(this.crowd, change, Date.now())
           this.noteTitle(signal.title)
           void this.maybeLookup()
+          await this.readOcr(frame)
         }
       }
       if (settings.hearComputerAudio && (voice || signal)) {
@@ -863,6 +1216,7 @@ export class ChatController {
           noteScreen(this.crowd, amount, Date.now())
           this.noteTitle(frame.title)
           if (changed) image = frame.jpegBase64
+          await this.readOcr(frame)
         }
       }
       const decision = shouldCallModel({
@@ -899,9 +1253,10 @@ export class ChatController {
           pcAudio,
           recentLines: [...this.recentLines],
           avoidUsernames: [...this.avoid],
-          context: [compactContext(this.knowledge, Date.now()), this.activity ? `Screen activity: ${this.activity.detail}` : '']
+          context: [compactContext(this.knowledge, Date.now()), this.activity ? `Screen activity: ${this.activity.detail}` : '', this.screenText ? `On-screen text: ${this.screenText}` : '']
             .filter(Boolean)
             .join('\n'),
+          seenText: this.screenText,
           customBlock: customPromptBlock(this.deps.customCrowd?.().viewers ?? [], this.deps.customCrowd?.().randomNames ?? []),
           speedLevel: settings.speedLevel,
           now: Date.now(),
@@ -939,4 +1294,25 @@ export class ChatController {
       this.publish()
     }
   }
+
+  private async readOcr(frame: { jpegBase64: string; hash: string } | null): Promise<void> {
+    if (!frame || !this.deps.getSettings().readScreenText || !this.deps.ocr) return
+    if (frame.hash && frame.hash === this.lastOcrHash && this.screenText) return
+    const task = this.deps
+      .ocr(frame.jpegBase64, frame.hash)
+      .then((text) => {
+        const cleaned = cleanOcrText(text)
+        if (cleaned) {
+          this.lastOcrHash = frame.hash
+          this.screenText = cleaned
+        }
+        return cleaned
+      })
+      .catch(() => '')
+    await Promise.race([task, delay(900)])
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }

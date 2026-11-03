@@ -21,15 +21,16 @@ import { applyPatch, DEFAULT_SETTINGS } from '../src/shared/settings'
 const pace = paceFor('normal')
 
 describe('local brain catalog', () => {
-  it('bundles one Qwen model inside the 0.4 to 0.8 GB window', () => {
+  it('offers the Q4 and Q8 downloads and does not bundle either model', () => {
     const medium = modelSpec('medium')
     const small = modelSpec('small')
-    expect(medium.bundled).toBe(true)
+    expect(medium.bundled).toBe(false)
     expect(medium.family).toBe('Qwen2.5-0.5B-Instruct')
     expect(medium.quant).toBe('Q8_0')
     expect(medium.bytes).toBeGreaterThan(0.4 * 1e9)
     expect(medium.bytes).toBeLessThan(0.8 * 1e9)
     expect(small.bundled).toBe(false)
+    expect(modelSpec('smart').bundled).toBe(false)
     expect(small.bytes).toBeLessThan(medium.bytes)
     expect(small.bytes).toBeGreaterThan(0.4 * 1e9)
     expect(formatBytes(medium.bytes)).toBe('644 MB')
@@ -57,6 +58,7 @@ describe('local brain scheduling', () => {
   it('waits, skips a busy CPU, and falls back when the model is missing', () => {
     expect(brainDecision({ enabled: true, ready: true, cpuPercent: 10, lastAt: 0, now: 20_000, pace })).toBe('run')
     expect(brainDecision({ enabled: true, ready: true, cpuPercent: 10, lastAt: 20_000, now: 25_000, pace })).toBe('wait')
+    expect(brainDecision({ enabled: true, ready: true, cpuPercent: 10, lastAt: 20_000, now: 25_000, pace, force: true })).toBe('run')
     expect(brainDecision({ enabled: true, ready: true, cpuPercent: 80, lastAt: 0, now: 20_000, pace })).toBe('fallback')
     expect(brainDecision({ enabled: true, ready: true, cpuPercent: 80, lastAt: 0, now: 20_000, pace: paceFor('heavy') })).toBe('run')
     expect(brainDecision({ enabled: false, ready: true, cpuPercent: null, lastAt: 0, now: 20_000, pace })).toBe('fallback')

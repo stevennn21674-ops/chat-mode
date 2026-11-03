@@ -25,6 +25,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   baseUrl: DEFAULT_BASE_URL,
   aiMode: false,
   showDebugTranscript: false,
+  showHeard: true,
+  autoScroll: true,
+  lookAtScreenWhenTalking: true,
+  readScreenText: true,
   offlineMode: false,
   overlayMode: 'normal',
   localBrain: true,
@@ -138,6 +142,10 @@ export function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   if (typeof raw.ecoMode === 'boolean') next.ecoMode = raw.ecoMode
   if (typeof raw.aiMode === 'boolean') next.aiMode = raw.aiMode
   if (typeof raw.showDebugTranscript === 'boolean') next.showDebugTranscript = raw.showDebugTranscript
+  if (typeof raw.showHeard === 'boolean') next.showHeard = raw.showHeard
+  if (typeof raw.autoScroll === 'boolean') next.autoScroll = raw.autoScroll
+  if (typeof raw.lookAtScreenWhenTalking === 'boolean') next.lookAtScreenWhenTalking = raw.lookAtScreenWhenTalking
+  if (typeof raw.readScreenText === 'boolean') next.readScreenText = raw.readScreenText
   if (typeof raw.offlineMode === 'boolean') next.offlineMode = raw.offlineMode
   if (raw.overlayMode === 'normal' || raw.overlayMode === 'game') next.overlayMode = raw.overlayMode
   if (typeof raw.localBrain === 'boolean') next.localBrain = raw.localBrain

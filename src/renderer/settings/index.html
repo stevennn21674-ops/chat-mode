@@ -23,7 +23,10 @@
         <label class="switch"><input id="pc-audio" type="checkbox" /> Hear computer audio</label>
         <label class="switch"><input id="startup" type="checkbox" /> Launch at startup</label>
         <label class="switch"><input id="offline" type="checkbox" /> Offline mode</label>
-        <label class="switch"><input id="debug-transcript" type="checkbox" /> Show debug transcript</label>
+        <label class="switch"><input id="show-heard" type="checkbox" /> Show what I said</label>
+        <label class="switch"><input id="auto-scroll" type="checkbox" /> Auto-scroll chat</label>
+        <label class="switch"><input id="look-screen" type="checkbox" /> Look at screen when I talk</label>
+        <label class="switch"><input id="read-screen-text" type="checkbox" /> Read on-screen text (OCR)</label>
         <label class="switch"><input id="game-mode" type="checkbox" /> Game mode (re-assert topmost every 1s)</label>
         <p class="hint">Offline mode blocks the comment service and web lookups. If the PC has no internet, chat stays offline until the connection returns. Game mode keeps the overlay above borderless fullscreen. A true exclusive fullscreen game can still cover it: use borderless or windowed fullscreen (Roblox is usually borderless; Shift+F11 or Esc, Settings, fullscreen).</p>
         <p id="offline-note" class="hint"></p>
@@ -34,7 +37,11 @@
           Microphone
           <select id="mic"></select>
         </label>
-        <p class="hint">Uses the Windows default until you pick another device. Speech stays on this PC.</p>
+        <p class="hint">Uses the Windows default until you pick another device. Speech stays on this PC. Hold V a moment after the last word so it is not cut off.</p>
+        <div class="actions">
+          <button id="test-mic" type="button">Test mic</button>
+        </div>
+        <p id="mic-test" class="hint"></p>
         <p class="hint">Hear computer audio is on by default. The last 18 seconds of sound from this PC are transcribed here and added when you press ` or finish talking. Silence is skipped, and it does not make its own request.</p>
         <p id="speech" class="hint"></p>
         <p id="hook" class="hint"></p>
@@ -72,7 +79,7 @@
       <section class="card">
         <h2>Local brain (offline understanding)</h2>
         <label class="switch"><input id="local-brain" type="checkbox" /> Use the on-device model when AI mode is off</label>
-        <p class="hint">The medium model is included with the app, so it works right after install. It is a small Qwen model and is less accurate than the cloud model. It reads the mic, computer audio, window title, and viewer notes on this PC. No network is needed after the file is on disk. Ban commands still use the built-in parser.</p>
+        <p class="hint">No model is in the installer. The first time this is turned on, Settings asks before downloading a Qwen 0.5B file: Q4 is about 469 MB, Q8 is about 644 MB. It reads the mic, on-screen text, colors, motion, and the window title on this PC. It cannot see the picture the way AI mode can. Ban commands still use the built-in parser.</p>
         <label>Brain speed
           <select id="brain-speed">
             <option value="light">Light</option>
@@ -80,11 +87,11 @@
             <option value="heavy">Heavy</option>
           </select>
         </label>
-        <p class="hint">Light waits longer and uses one CPU thread. Heavy answers sooner and uses more CPU. If the PC is already busy, chat falls back to the built-in lines. Smarter brain is Qwen2.5-1.5B Q4, downloaded only if you ask. It is not in the installer. It is a bit more accurate and uses more CPU and about 1 GB of disk. The included 0.5B model stays the default.</p>
+        <p class="hint">Light waits longer and uses one CPU thread. Heavy answers sooner and uses more CPU. If the PC is already busy, chat falls back to the built-in lines. Smarter brain is an optional Qwen2.5-1.5B Q4 download of about 1.04 GB. Q4 and Q8 are both downloads. Nothing is packed into the installer.</p>
         <label>Model size
           <select id="brain-size">
-            <option value="medium">Medium (included, more accurate)</option>
-            <option value="small">Small (faster, separate download)</option>
+            <option value="medium">Q8 (about 644 MB, more accurate)</option>
+            <option value="small">Q4 (about 469 MB, smaller)</option>
             <option value="smart">Smarter brain (optional, about 1 GB)</option>
           </select>
         </label>
@@ -94,12 +101,18 @@
           <button id="brain-download" type="button">Download model</button>
           <button id="brain-delete" type="button">Delete model</button>
         </div>
+        <p id="ocr-note" class="hint"></p>
+        <p id="disk-used" class="hint"></p>
+        <div class="actions">
+          <button id="disk-delete" type="button">Delete all downloaded data</button>
+        </div>
       </section>
 
       <section class="card">
         <label>Chat speed <output id="speed-out"></output>
           <input id="speed" type="range" min="1" max="7" step="1" />
         </label>
+        <p class="hint">The chat follows the newest line. Scroll up to pause that, then scroll back to the bottom or use Jump to latest. Turn auto-scroll off above to leave the list where you put it. The wheel over the chat scrolls it. Clicks still change speed, and a right-drag still moves the window.</p>
         <label class="switch"><input id="lock-position" type="checkbox" /> Lock position</label>
         <p class="hint">Left click slows, right click speeds up, and a right-drag moves the chat unless position is locked. The speed meter stays on the overlay. Slower and Faster are also in the tray.</p>
         <label>Opacity <output id="opacity-out"></output>

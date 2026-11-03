@@ -211,7 +211,7 @@ export class BrainService {
     this.writeRemoved([...removed])
     const detail = stuck
       ? 'Some model files are still on disk. Chat will not use the included copy until you download a model again.'
-      : 'Local model deleted. Chat uses the built-in lines until you download it again. A portable exe still contains the model inside the program file.'
+      : 'Local model deleted. Chat uses the built-in lines until you download it again.'
     this.flash = detail
     this.push(true)
     return detail
@@ -408,7 +408,7 @@ export class BrainService {
       existing = 0
     }
     if (existing === total && total > 0) return
-    const headers: Record<string, string> = { 'User-Agent': 'ChatMode/0.6.0' }
+    const headers: Record<string, string> = { 'User-Agent': 'ChatMode/0.7.0' }
     const range = resumeHeader(existing)
     if (range) headers.Range = range.Range
     const response = await fetch(url, { headers, redirect: 'follow', signal })

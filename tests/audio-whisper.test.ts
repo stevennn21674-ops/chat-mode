@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { downsample, encodeWavPcm16, isSilentPcm, PcmWindow } from '../src/shared/audio'
+import { asFloat32, downsample, encodeWavPcm16, isSilentPcm, PcmWindow, trimSilence } from '../src/shared/audio'
 import { parseWhisperStdout } from '../src/shared/whisper'
 
 describe('audio', () => {
@@ -17,6 +17,21 @@ describe('audio', () => {
     expect(snap?.samples.length).toBe(16000 * 18)
     expect(isSilentPcm(Float32Array.from({ length: 1600 }, () => 0))).toBe(true)
     expect(isSilentPcm(Float32Array.from({ length: 1600 }, () => 0.2))).toBe(false)
+  })
+
+  it('trims silence and accepts float bytes from the mic path', () => {
+    const quiet = new Float32Array(8000)
+    const loud = Float32Array.from({ length: 1600 }, () => 0.2)
+    const clip = new Float32Array(quiet.length + loud.length + quiet.length)
+    clip.set(loud, quiet.length)
+    const trimmed = trimSilence(clip, 16000)
+    expect(trimmed.length).toBeGreaterThan(1000)
+    expect(trimmed.length).toBeLessThan(clip.length)
+    expect(trimSilence(quiet, 16000).length).toBe(0)
+    const bytes = new Uint8Array(loud.buffer.slice(0))
+    const restored = asFloat32(bytes, 'f32le')
+    expect(restored?.[0]).toBeCloseTo(0.2)
+    expect(asFloat32([0.25, -0.5])?.[1]).toBeCloseTo(-0.5)
   })
 
   it('writes a 16-bit wav header', () => {

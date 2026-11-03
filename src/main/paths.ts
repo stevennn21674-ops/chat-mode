@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 
 export function settingsFile(): string {
   return join(app.getPath('userData'), 'settings.json')
@@ -37,6 +37,8 @@ export function resourceDir(...parts: string[]): string {
 
 export function whisperLocation(): { bin: string; model: string } | null {
   const dir = resourceDir('whisper')
+  const packed = dir.includes(`${sep}app.asar${sep}`) && !dir.includes(`${sep}app.asar.unpacked${sep}`)
+  if (packed) return null
   const bin = join(dir, process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli')
   const model = join(dir, 'ggml-tiny.en.bin')
   if (!existsSync(bin) || !existsSync(model)) return null

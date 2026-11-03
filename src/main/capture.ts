@@ -1,5 +1,6 @@
 import { desktopCapturer, nativeImage, screen, type NativeImage } from 'electron'
 import { differenceHash } from '../shared/frame-diff'
+import { sceneCue, type SceneCue } from '../shared/scene-cues'
 import { dominantColorNames, isMostlyBlack } from '../shared/screen-cues'
 
 export const DEMO_JPEG =
@@ -10,6 +11,7 @@ export interface CapturedFrame {
   hash: string
   colors: string[]
   title: string | null
+  scene: SceneCue
 }
 
 export function hashImage(image: NativeImage): string {
@@ -64,11 +66,19 @@ function frameFrom(image: NativeImage, title: string | null): CapturedFrame | nu
   }
   const jpeg = image.toJPEG(60)
   const hashed = nativeImage.createFromBuffer(jpeg)
+  const size = image.getSize()
+  let bitmap = new Uint8Array(0)
+  try {
+    bitmap = new Uint8Array(image.toBitmap())
+  } catch {
+    bitmap = new Uint8Array(0)
+  }
   return {
     jpegBase64: jpeg.toString('base64'),
     hash: hashed.isEmpty() ? '' : hashImage(hashed),
     colors: colorsOf(image),
-    title
+    title,
+    scene: sceneCue(bitmap, size.width, size.height)
   }
 }
 

@@ -4,6 +4,7 @@ import { badgeOf, pickCustom, viewerLine, type CustomViewer } from './custom-vie
 import { isKidSafe } from './filter'
 import { makeId } from './ids'
 import { nluLine, personalityFor, type Intent } from './nlu'
+import { groundedLines } from './ocr-text'
 import { activityLines, type ActivityState } from './screen-activity'
 import type { ScreenCue } from './screen-cues'
 import type { Badge, ChatMessage } from './types'
@@ -180,6 +181,7 @@ export interface LocalInput {
   fact?: string
   knowledgeLine?: string
   activity?: { state: ActivityState; game: string | null; at: number } | null
+  screenText?: string
 }
 
 function pick<T>(items: readonly T[], rng: () => number): T {
@@ -379,6 +381,10 @@ export function makeLocalMessages(input: LocalInput): ChatMessage[] {
         speaker = { name: person.username, badge: badgeOf(person.role), color: person.color }
         text = viewerLine(person, input.rng, keywords)
       }
+    }
+    if (!text && !forceBored && i === 0 && input.screenText) {
+      const grounded = groundedLines({ ocr: input.screenText, colors: [], game: null, kind: 'unknown' })
+      if (grounded[0] && isKidSafe(grounded[0])) text = grounded[0]
     }
     if (
       !text &&

@@ -1,4 +1,5 @@
 import { formatViewerCount } from '@shared/crowd'
+import { stickForScroll } from '@shared/voice-react'
 import { synthTone } from '@shared/tones'
 import type { AlertBanner, ChatMessage, OverlayState, PointerEventPayload } from '@shared/types'
 
@@ -29,19 +30,46 @@ const hype = document.querySelector('#hype') as HTMLElement
 const hypeLabel = document.querySelector('#hype-label') as HTMLElement
 const hypeFill = document.querySelector('#hype-fill') as HTMLElement
 const debug = document.querySelector('#debug') as HTMLElement
+const heard = document.querySelector('#heard') as HTMLElement
+const micFault = document.querySelector('#mic-fault') as HTMLElement
+const micMeter = document.querySelector('#mic-meter') as HTMLElement
+const micMeterFill = document.querySelector('#mic-meter-fill') as HTMLElement
+const jump = document.querySelector('#jump') as HTMLButtonElement
 const alertBox = document.querySelector('#alert') as HTMLElement
 const alertKicker = document.querySelector('#alert-kicker') as HTMLElement
 const alertMain = document.querySelector('#alert-main') as HTMLElement
 const alertText = document.querySelector('#alert-text') as HTMLElement
 
 let stick = true
+let autoScroll = true
 let hypeTimer = 0
 let alertTimer = 0
 let hovering = false
 let audioCtx: AudioContext | null = null
 
+function distanceFromBottom(): number {
+  return log.scrollHeight - log.scrollTop - log.clientHeight
+}
+
+function updateJump(): void {
+  jump.classList.toggle('hidden', !(autoScroll && !stick))
+}
+
 log.addEventListener('scroll', () => {
-  stick = log.scrollHeight - log.scrollTop - log.clientHeight < 48
+  stick = stickForScroll(autoScroll, distanceFromBottom())
+  updateJump()
+})
+
+log.addEventListener('wheel', (event) => {
+  event.stopPropagation()
+})
+
+jump.addEventListener('click', (event) => {
+  event.preventDefault()
+  event.stopPropagation()
+  stick = autoScroll
+  log.scrollTop = log.scrollHeight
+  updateJump()
 })
 
 function setHover(x: number, y: number): void {
@@ -55,6 +83,7 @@ function setHover(x: number, y: number): void {
 window.addEventListener('mousemove', (event) => setHover(event.clientX, event.clientY))
 panel.addEventListener('pointerdown', (event) => {
   if (event.button === 1) return
+  if ((event.target as HTMLElement).closest('#jump')) return
   const resize = (event.target as HTMLElement).closest('#resize')
   window.chat.pointer({
     type: 'down',
@@ -140,7 +169,8 @@ function append(message: ChatMessage): void {
   }
   log.append(line)
   while (log.querySelectorAll('.line').length > 80) log.querySelector('.line')?.remove()
-  if (stick) log.scrollTop = log.scrollHeight
+  if (autoScroll && stick) log.scrollTop = log.scrollHeight
+  updateJump()
   if (message.kind === 'hype') showHype(message)
 }
 
@@ -187,6 +217,25 @@ function applyState(state: OverlayState): void {
   paused.classList.toggle('hidden', !state.capturePaused)
   mic.classList.toggle('hidden', !state.micLive && !state.micNote)
   micLabel.textContent = state.micNote || 'Mic live'
+  autoScroll = state.autoScroll !== false
+  if (!autoScroll) stick = false
+  micMeter.classList.toggle('hidden', !state.micLive)
+  micMeterFill.style.width = `${Math.round(Math.max(0, Math.min(1, state.micLevel || 0)) * 100)}%`
+  if (state.heardText) {
+    heard.textContent = state.heardText
+    heard.classList.remove('hidden')
+  } else {
+    heard.textContent = ''
+    heard.classList.add('hidden')
+  }
+  if (state.micFault) {
+    micFault.textContent = state.micFault
+    micFault.classList.remove('hidden')
+  } else {
+    micFault.textContent = ''
+    micFault.classList.add('hidden')
+  }
+  updateJump()
   if (state.debugText) {
     debug.textContent = state.debugText
     debug.classList.remove('hidden')

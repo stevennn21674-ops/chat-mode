@@ -42,6 +42,12 @@ contextBridge.exposeInMainWorld('settings', {
   testAlert(): Promise<boolean> {
     return ipcRenderer.invoke('alerts:test')
   },
+  testMic(): Promise<{ ok: boolean; detail: string }> {
+    return ipcRenderer.invoke('settings:test-mic')
+  },
+  deleteDownloads(): Promise<SettingsView> {
+    return ipcRenderer.invoke('brain:delete-all')
+  },
   onChange(callback: (view: SettingsView) => void): () => void {
     const listener = (_event: unknown, view: SettingsView): void => callback(view)
     ipcRenderer.on('settings:changed', listener)

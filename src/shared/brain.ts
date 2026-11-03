@@ -39,6 +39,8 @@ export interface BrainTurn {
   activity?: string
   liveLines?: string[]
   joke?: string
+  screenText?: string
+  sceneCaption?: string
 }
 
 interface CatalogFile {
@@ -82,10 +84,11 @@ export function brainDecision(input: {
   lastAt: number
   now: number
   pace: BrainPace
+  force?: boolean
 }): 'run' | 'wait' | 'fallback' {
   if (!input.enabled || !input.ready) return 'fallback'
   if (input.cpuPercent !== null && input.cpuPercent >= input.pace.cpuSkip) return 'fallback'
-  if (input.now - input.lastAt < input.pace.intervalMs) return 'wait'
+  if (!input.force && input.now - input.lastAt < input.pace.intervalMs) return 'wait'
   return 'run'
 }
 
@@ -191,6 +194,8 @@ export function buildBrainPrompt(input: BrainTurn, pace: BrainPace): { system: s
     heard.length ? heard.join('\n') : '(quiet)',
     input.context.trim() ? `Story so far: ${clip(input.context, 420)}` : '',
     input.activity?.trim() ? `Screen activity (local, not a picture): ${clip(input.activity, 240)}. React to the motion or the title. Do not invent objects.` : '',
+    input.sceneCaption?.trim() ? `Local screen cues: ${clip(input.sceneCaption, 180)}` : '',
+    input.screenText?.trim() ? `Text read on this PC from the screen: ${clip(input.screenText, 240)}` : '',
     input.joke?.trim() ? `Running joke to reuse, not a new one: the ${clip(input.joke, 24)} arc continues` : '',
     input.liveLines?.length ? `Real chat:\n${input.liveLines.slice(-4).map((line) => clip(line, 140)).join('\n')}` : '',
     'Recent chat:',

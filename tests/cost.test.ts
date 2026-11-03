@@ -109,6 +109,7 @@ describe('windows workflow', () => {
     expect(builder).toContain('npmRebuild: false')
     expect(builder).toContain('**/*.node')
     expect(builder).toContain('resources/brain')
+    expect(builder).toContain('!**/*.gguf')
     expect(yaml).toContain('fetch-brain.mjs')
     expect(yaml).toContain('resources/brain')
     const runs = yaml.split('\n').filter((line) => line.includes('run:'))

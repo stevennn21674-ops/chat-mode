@@ -174,7 +174,14 @@ export function allowAutoVision(input: {
   big: boolean
   usedThisHour: number
   cap: number
+  serviceCalls?: number
+  serviceCap?: number
+  reserveForVoice?: boolean
 }): boolean {
   if (!input.aiMode || !input.autoVision || input.offline || !input.big) return false
-  return input.usedThisHour < Math.max(1, input.cap)
+  if (input.usedThisHour >= Math.max(1, input.cap)) return false
+  if (input.reserveForVoice && typeof input.serviceCap === 'number' && typeof input.serviceCalls === 'number') {
+    if (input.serviceCalls >= Math.max(0, input.serviceCap - 1)) return false
+  }
+  return true
 }

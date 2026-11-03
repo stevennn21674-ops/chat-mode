@@ -31,6 +31,8 @@ export interface ProduceInput {
   backoffMs: number
   context?: string
   customBlock?: string
+  voiceTurn?: boolean
+  seenText?: string
 }
 
 export interface ProduceOutput {
@@ -105,7 +107,9 @@ export async function produceReactions(input: ProduceInput, deps: ProduceDeps): 
       avoidUsernames: input.avoidUsernames,
       batchCount: input.batchCount,
       hasImage: includeImage,
-      context: input.context
+      context: input.context,
+      voiceTurn: input.voiceTurn,
+      seenText: input.seenText
     }),
     imageBase64: includeImage ? input.imageBase64 : null,
     maxTokens: input.maxTokens

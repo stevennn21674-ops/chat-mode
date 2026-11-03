@@ -7,15 +7,17 @@ interface VoiceBridge {
       command:
         | { type: 'start'; deviceId: string }
         | { type: 'stop' }
+        | { type: 'test'; deviceId: string; ms: number }
         | { type: 'list' }
         | { type: 'loopback-start' }
         | { type: 'loopback-stop' }
         | { type: 'loopback-take' }
     ) => void
   ): void
-  submitAudio(payload: { sampleRate: number; pcm: Float32Array }): void
+  submitAudio(payload: { sampleRate: number; pcm: Uint8Array; encoding: 'f32le'; purpose: 'talk' | 'test' }): void
+  submitLevel(level: number): void
   submitDevices(devices: MicDevice[]): void
-  submitError(code: 'denied' | 'failed'): void
+  submitError(code: 'denied' | 'failed' | 'empty'): void
   submitLoopback(payload: { sampleRate: number; pcm: Float32Array }): void
   submitPcAudio(code: 'unavailable'): void
 }
@@ -31,6 +33,8 @@ let context: AudioContext | null = null
 let processor: ScriptProcessorNode | null = null
 let gain: GainNode | null = null
 let chunks: Float32Array[] = []
+let purpose: 'talk' | 'test' = 'talk'
+let levelAt = 0
 
 const pcAudio = new PcmWindow(18)
 let loopStream: MediaStream | null = null
@@ -57,33 +61,70 @@ async function teardown(send: boolean): Promise<void> {
   if (current) await current.close().catch(() => undefined)
   if (!send) return
   const length = recorded.reduce((sum, chunk) => sum + chunk.length, 0)
-  if (!length) return
+  if (!length) {
+    window.voice.submitError('empty')
+    window.voice.submitLevel(0)
+    return
+  }
   const merged = new Float32Array(length)
   let offset = 0
   for (const chunk of recorded) {
     merged.set(chunk, offset)
     offset += chunk.length
   }
-  window.voice.submitAudio({ sampleRate: rate, pcm: merged })
+  const bytes = new Uint8Array(merged.buffer.slice(merged.byteOffset, merged.byteOffset + merged.byteLength))
+  window.voice.submitAudio({ sampleRate: rate, pcm: bytes, encoding: 'f32le', purpose })
+  window.voice.submitLevel(0)
+}
+
+function constraints(deviceId: string): MediaTrackConstraints {
+  const audio: MediaTrackConstraints = {
+    channelCount: 1,
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true
+  }
+  if (deviceId) audio.deviceId = { exact: deviceId }
+  return audio
+}
+
+async function openMic(deviceId: string): Promise<MediaStream> {
+  try {
+    return await navigator.mediaDevices.getUserMedia({ audio: constraints(deviceId) })
+  } catch (error) {
+    if (!deviceId) throw error
+    return navigator.mediaDevices.getUserMedia({ audio: constraints('') })
+  }
 }
 
 async function start(deviceId: string): Promise<void> {
   await teardown(false)
-  const audio: MediaTrackConstraints = {
-    channelCount: 1,
-    echoCancellation: true,
-    noiseSuppression: true
-  }
-  if (deviceId) audio.deviceId = { exact: deviceId }
-  stream = await navigator.mediaDevices.getUserMedia({ audio })
+  stream = await openMic(deviceId)
   context = new AudioContext()
+  if (context.state === 'suspended') await context.resume()
+  if (context.state === 'suspended') throw new Error('audio context suspended')
   const source = context.createMediaStreamSource(stream)
   processor = context.createScriptProcessor(4096, 1, 1)
   gain = context.createGain()
   gain.gain.value = 0
   chunks = []
+  levelAt = 0
   processor.onaudioprocess = (event) => {
-    chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)))
+    const data = event.inputBuffer.getChannelData(0)
+    chunks.push(new Float32Array(data))
+    const now = performance.now()
+    if (now - levelAt < 80) return
+    levelAt = now
+    let sum = 0
+    const step = Math.max(1, Math.floor(data.length / 200))
+    let count = 0
+    for (let i = 0; i < data.length; i += step) {
+      const sample = data[i] ?? 0
+      sum += sample * sample
+      count += 1
+    }
+    const rms = count ? Math.sqrt(sum / count) : 0
+    window.voice.submitLevel(Math.max(0, Math.min(1, rms * 4)))
   }
   source.connect(processor)
   processor.connect(gain)
@@ -191,8 +232,17 @@ window.voice.onCommand((command) => {
     void listDevices()
     return
   }
-  if (command.type === 'start') {
-    void start(command.deviceId).catch(() => window.voice.submitError('failed'))
+  if (command.type === 'start' || command.type === 'test') {
+    purpose = command.type === 'test' ? 'test' : 'talk'
+    const deviceId = command.deviceId
+    void start(deviceId)
+      .then(() => {
+        if (command.type !== 'test') return
+        window.setTimeout(() => {
+          void teardown(true)
+        }, command.ms || 3000)
+      })
+      .catch(() => window.voice.submitError('failed'))
     return
   }
   if (command.type === 'loopback-start') {

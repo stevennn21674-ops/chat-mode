@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, desktopCapturer, dialog, globalShortcut, ipcMain, net, powerMonitor, session, screen, type OpenDialogOptions, type SaveDialogOptions } from 'electron'
 import type { Input } from 'electron'
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { callsInWindow } from '../shared/budget'
 import { allowLookup, fetchWikiFact } from '../shared/lookup'
 import { effectivelyOffline } from '../shared/net'
@@ -11,6 +12,8 @@ import { readSettingsFile } from '../shared/settings-file'
 import { resolveService } from '../shared/service-defaults'
 import { PAUSE_HOTKEY, TALK_KEY, type ChatMessage, type MicDevice, type OverlayState, type SettingsView } from '../shared/types'
 import { BrainService } from './brain-service'
+import { directoryBytes, fileBytes } from './disk'
+import { OcrService } from './ocr-service'
 import { ChatController } from './chat-controller'
 import { capturePrimaryJpeg, DEMO_JPEG } from './capture'
 import { testService } from './connection-test'
@@ -144,6 +147,16 @@ async function bootstrap(): Promise<void> {
     }
   })
   brain.startSampler()
+  const ocr = new OcrService({
+    dir: join(app.getPath('userData'), 'ocr'),
+    log: logVoiceDebug,
+    notify: () => {
+      if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.webContents.send('settings:changed', view(false))
+    },
+    online: () => !effectivelyOffline(store.settings.offlineMode, reachable),
+    enabled: () => store.settings.readScreenText
+  })
+  if (store.settings.readScreenText) void ocr.prepare()
   const wikiStamps: number[] = []
   const wikiCache = loadWikiCache(wikiCacheFile())
   let reachable = true
@@ -226,7 +239,8 @@ async function bootstrap(): Promise<void> {
       if (!chatRef || chatRef.win.isDestroyed()) return
       chatRef.win.webContents.send('overlay:alert', alert)
     },
-    liveLines: () => liveRef?.recent() ?? []
+    liveLines: () => liveRef?.recent() ?? [],
+    ocr: (jpeg, hash) => ocr.read(jpeg, hash)
   })
 
   const overlay = new OverlayController(
@@ -268,9 +282,19 @@ async function bootstrap(): Promise<void> {
     chatEnabled: () => store.settings.enabled,
     deviceId: () => store.settings.micDeviceId,
     onLive: (live) => controller.setMicLive(live),
+    onLevel: (level) => controller.setMicLevel(level),
     onNote: (note) => controller.setMicNote(note),
-    onTranscript: (text) => controller.noteSpeech(text),
-    log
+    onFault: (reason) => controller.setMicFault(reason),
+    onRelease: () => {
+      void controller.prepareVoiceScreen()
+    },
+    onTranscript: (text) => {
+      void controller.noteSpeech(text)
+    },
+    log: (message) => {
+      log(message)
+      logVoiceDebug(message)
+    }
   })
 
   // The tray renders (and reads status) before createTray returns.
@@ -365,6 +389,8 @@ async function bootstrap(): Promise<void> {
       localBrainProgress: panel.progress,
       localBrainNote: panel.note,
       localBrainButton: panel.button,
+      diskUsed: formatBytes(directoryBytes(join(app.getPath('userData'), 'brain')) + directoryBytes(join(app.getPath('userData'), 'ocr')) + fileBytes(wikiCacheFile())),
+      ocrNote: ocr.status(),
       youtubeApiKey: includeKey ? youtubeKeys.get() : '',
       hasYoutubeKey: youtubeKeys.get().length > 0,
       liveStatus
@@ -504,6 +530,7 @@ async function bootstrap(): Promise<void> {
   ipcMain.handle('settings:update', (_event, patch: unknown) => {
     const before = store.settings.launchAtStartup
     const heard = store.settings.hearComputerAudio
+    const readText = store.settings.readScreenText
     if (patch && typeof patch === 'object' && typeof (patch as { capturePaused?: unknown }).capturePaused === 'boolean') {
       controller.setCapturePaused((patch as { capturePaused: boolean }).capturePaused)
     }
@@ -514,6 +541,7 @@ async function bootstrap(): Promise<void> {
     brain.onSettings()
     if (store.settings.launchAtStartup !== before) applyLogin(store.settings.launchAtStartup)
     if (store.settings.hearComputerAudio !== heard) loopback.setEnabled(store.settings.hearComputerAudio)
+    if (store.settings.readScreenText && !readText) void ocr.prepare()
     refresh()
     return view(false)
   })
@@ -547,6 +575,27 @@ async function bootstrap(): Promise<void> {
     const result = await brain.download(store.settings.brainSize)
     refresh()
     return result
+  })
+  ipcMain.handle('settings:test-mic', () => talk.testMic())
+  ipcMain.handle('brain:delete-all', async () => {
+    const parent = settingsWindow && !settingsWindow.isDestroyed() ? settingsWindow : undefined
+    const options = {
+      type: 'question' as const,
+      buttons: ['Delete', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Delete downloaded data',
+      message: 'Delete all data Chat Mode downloaded on this PC?',
+      detail: 'This removes local brain models and the on-screen text file. Settings and your API key stay. Chat keeps working with the built-in lines.'
+    }
+    const confirm = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)
+    if (confirm.response !== 0) return view(false)
+    brain.deleteModels()
+    ocr.wipe()
+    rmSync(wikiCacheFile(), { force: true })
+    for (const key of Object.keys(wikiCache)) delete wikiCache[key]
+    refresh()
+    return view(false)
   })
   ipcMain.handle('brain:delete', async () => {
     const parent = settingsWindow && !settingsWindow.isDestroyed() ? settingsWindow : undefined
@@ -594,14 +643,23 @@ async function bootstrap(): Promise<void> {
     }
   })
   ipcMain.on('voice:audio', (_event, payload: unknown) => {
-    const record = payload as { sampleRate?: unknown; pcm?: unknown }
-    const pcm = asFloat32(record?.pcm)
+    const record = payload as { sampleRate?: unknown; pcm?: unknown; encoding?: unknown; purpose?: unknown }
+    const encoding = record?.encoding === 'f32le' ? 'f32le' : undefined
+    const pcm = asFloat32(record?.pcm, encoding)
     const sampleRate = typeof record?.sampleRate === 'number' ? record.sampleRate : 0
-    if (!pcm || sampleRate <= 0) return
-    void talk.audio(sampleRate, pcm)
+    const purpose = record?.purpose === 'test' ? 'test' : 'talk'
+    if (!pcm || sampleRate <= 0) {
+      talk.fail('recording was empty')
+      return
+    }
+    void talk.audio(sampleRate, pcm, purpose)
+  })
+  ipcMain.on('voice:level', (_event, level: unknown) => {
+    if (typeof level === 'number') talk.level(level)
   })
   ipcMain.on('voice:error', (_event, code: unknown) => {
-    controller.setMicNote(code === 'denied' ? 'Microphone is blocked' : 'Microphone failed')
+    const reason = code === 'denied' ? 'microphone permission denied' : code === 'empty' ? 'no sound from the microphone' : 'microphone failed to open'
+    talk.fail(reason)
   })
   let pcAudioNoted = false
   ipcMain.on('voice:pc-audio', () => {

@@ -16,6 +16,8 @@ interface SettingsBridge {
   downloadBrain(): Promise<{ ok: boolean; detail: string }>
   deleteBrain(): Promise<SettingsView>
   testAlert(): Promise<boolean>
+  testMic(): Promise<{ ok: boolean; detail: string }>
+  deleteDownloads(): Promise<SettingsView>
   onChange(callback: (view: SettingsView) => void): () => void
 }
 
@@ -31,7 +33,15 @@ const voice = document.querySelector('#voice') as HTMLInputElement
 const pcAudio = document.querySelector('#pc-audio') as HTMLInputElement
 const startup = document.querySelector('#startup') as HTMLInputElement
 const offline = document.querySelector('#offline') as HTMLInputElement
-const debugTranscript = document.querySelector('#debug-transcript') as HTMLInputElement
+const showHeard = document.querySelector('#show-heard') as HTMLInputElement
+const autoScroll = document.querySelector('#auto-scroll') as HTMLInputElement
+const lookScreen = document.querySelector('#look-screen') as HTMLInputElement
+const readScreenText = document.querySelector('#read-screen-text') as HTMLInputElement
+const testMic = document.querySelector('#test-mic') as HTMLButtonElement
+const micTest = document.querySelector('#mic-test') as HTMLElement
+const ocrNote = document.querySelector('#ocr-note') as HTMLElement
+const diskUsed = document.querySelector('#disk-used') as HTMLElement
+const diskDelete = document.querySelector('#disk-delete') as HTMLButtonElement
 const gameMode = document.querySelector('#game-mode') as HTMLInputElement
 const offlineNote = document.querySelector('#offline-note') as HTMLElement
 const mic = document.querySelector('#mic') as HTMLSelectElement
@@ -105,7 +115,12 @@ function render(view: SettingsView): void {
   pcAudio.checked = view.hearComputerAudio
   startup.checked = view.launchAtStartup
   offline.checked = view.offlineMode
-  debugTranscript.checked = view.showDebugTranscript
+  showHeard.checked = view.showHeard
+  autoScroll.checked = view.autoScroll
+  lookScreen.checked = view.lookAtScreenWhenTalking
+  readScreenText.checked = view.readScreenText
+  ocrNote.textContent = view.ocrNote
+  diskUsed.textContent = `Disk used by Chat Mode: ${view.diskUsed}`
   gameMode.checked = view.overlayMode === 'game'
   lockPosition.checked = view.lockPosition
   screenWatch.checked = view.screenWatch
@@ -209,7 +224,25 @@ voice.addEventListener('change', () => void window.settings.update({ voiceEnable
 pcAudio.addEventListener('change', () => void window.settings.update({ hearComputerAudio: pcAudio.checked }))
 startup.addEventListener('change', () => void window.settings.update({ launchAtStartup: startup.checked }))
 offline.addEventListener('change', () => void window.settings.update({ offlineMode: offline.checked }))
-debugTranscript.addEventListener('change', () => void window.settings.update({ showDebugTranscript: debugTranscript.checked }))
+showHeard.addEventListener('change', () => void window.settings.update({ showHeard: showHeard.checked }))
+autoScroll.addEventListener('change', () => void window.settings.update({ autoScroll: autoScroll.checked }))
+lookScreen.addEventListener('change', () => void window.settings.update({ lookAtScreenWhenTalking: lookScreen.checked }))
+readScreenText.addEventListener('change', () => void window.settings.update({ readScreenText: readScreenText.checked }))
+testMic.addEventListener('click', () => {
+  micTest.textContent = 'Listening for 3 seconds…'
+  testMic.disabled = true
+  void window.settings.testMic().then((result) => {
+    micTest.textContent = result.ok ? `heard: ${result.detail}` : result.detail
+  }).finally(() => {
+    testMic.disabled = false
+  })
+})
+diskDelete.addEventListener('click', () => {
+  diskDelete.disabled = true
+  void window.settings.deleteDownloads().finally(() => {
+    diskDelete.disabled = false
+  })
+})
 gameMode.addEventListener('change', () => void window.settings.update({ overlayMode: gameMode.checked ? 'game' : 'normal' }))
 lockPosition.addEventListener('change', () => void window.settings.update({ lockPosition: lockPosition.checked }))
 screenWatch.addEventListener('change', () => void window.settings.update({ screenWatch: screenWatch.checked }))
@@ -266,7 +299,12 @@ pause.addEventListener('click', () => {
 reset.addEventListener('click', () => void window.settings.resetPosition())
 
 ai.addEventListener('change', () => void window.settings.update({ aiMode: ai.checked }))
-localBrain.addEventListener('change', () => void window.settings.update({ localBrain: localBrain.checked }))
+localBrain.addEventListener('change', () => {
+  const turningOn = localBrain.checked
+  void window.settings.update({ localBrain: turningOn }).then((view) => {
+    if (turningOn && !view.localBrainReady && !view.localBrainDownloading) void window.settings.downloadBrain()
+  })
+})
 brainSpeed.addEventListener('change', () => {
   const speed = brainSpeed.value
   if (speed === 'light' || speed === 'normal' || speed === 'heavy') void window.settings.update({ brainSpeed: speed })

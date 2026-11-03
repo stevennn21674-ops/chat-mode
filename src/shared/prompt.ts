@@ -99,6 +99,8 @@ export function buildUserText(input: {
   hasImage: boolean
   pcAudio?: string[]
   context?: string
+  voiceTurn?: boolean
+  seenText?: string
 }): string {
   const speech = input.transcripts.length
     ? input.transcripts.map((line, index) => `${index + 1}. ${line}`).join('\n')
@@ -125,6 +127,15 @@ export function buildUserText(input: {
     heard,
     '',
     ...(context ? ['What has been happening, from sound and window titles:', context, ''] : []),
+    ...(input.voiceTurn
+      ? [
+          'The streamer just spoke. Answer those words directly. Use the picture when one is attached: it is the screen from the moment they let go of the talk key. Quick reactions, a direct answer, then a follow-up question. Do not ignore what they said.',
+          ''
+        ]
+      : []),
+    ...(input.seenText?.trim()
+      ? ['Text read on this PC from the screen (it can be incomplete):', input.seenText.trim().slice(0, 400), '']
+      : []),
     'Recent chat already on screen:',
     recent,
     '',

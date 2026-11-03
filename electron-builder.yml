@@ -15,6 +15,13 @@ files:
   - "!**/*.md"
   - "!{.env,.env.example,tsconfig.json,vitest.config.ts,electron.vite.config.ts}"
   - "!resources/brain/**"
+  - "!node_modules/tesseract.js-core/tesseract-core.js"
+  - "!node_modules/tesseract.js-core/tesseract-core.wasm"
+  - "!node_modules/tesseract.js-core/tesseract-core.wasm.js"
+  - "!node_modules/tesseract.js-core/tesseract-core-simd.js"
+  - "!node_modules/tesseract.js-core/tesseract-core-simd.wasm"
+  - "!node_modules/tesseract.js-core/tesseract-core-simd.wasm.js"
+  - "!node_modules/tesseract.js-core/*.wasm.js"
 extraResources:
   - from: resources/whisper
     to: whisper
@@ -29,9 +36,12 @@ extraResources:
       - "**/*"
       - "!**/.gitkeep"
       - "!**/*.partial"
+      - "!**/*.gguf"
 asarUnpack:
   - "**/*.node"
   - "**/node_modules/uiohook-napi/**"
+  - "**/node_modules/tesseract.js/**"
+  - "**/node_modules/tesseract.js-core/**"
 win:
   signAndEditExecutable: false
   target:
