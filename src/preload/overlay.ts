@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld('chat', {
   pointer(payload: PointerEventPayload): void {
     ipcRenderer.send('overlay:pointer', payload)
   },
+  fps(value: number): void {
+    ipcRenderer.send('overlay:fps', value)
+  },
   onMessage(callback: (message: ChatMessage) => void): () => void {
     const listener = (_event: unknown, message: ChatMessage): void => callback(message)
     ipcRenderer.on('overlay:message', listener)

@@ -38,6 +38,8 @@ function colorsOf(image: NativeImage): string[] {
   }
 }
 
+let titleCache: { at: number; title: string | null } = { at: 0, title: null }
+
 async function foregroundTitle(): Promise<string | null> {
   try {
     const windows = await desktopCapturer.getSources({
@@ -82,15 +84,25 @@ function frameFrom(image: NativeImage, title: string | null): CapturedFrame | nu
   }
 }
 
-export async function captureWatchFrame(): Promise<{ bgra: Uint8Array; title: string | null } | null> {
+async function cachedTitle(ttl: number): Promise<string | null> {
+  if (Date.now() - titleCache.at < ttl) return titleCache.title
+  const title = await foregroundTitle()
+  titleCache = { at: Date.now(), title }
+  return title
+}
+
+export async function captureWatchFrame(
+  thumb: { width: number; height: number } = { width: 32, height: 18 },
+  titleTtl = 8000
+): Promise<{ bgra: Uint8Array; title: string | null } | null> {
   const display = screen.getPrimaryDisplay()
   const [sources, title] = await Promise.all([
     desktopCapturer.getSources({
       types: ['screen'],
-      thumbnailSize: { width: 64, height: 36 },
+      thumbnailSize: { width: Math.max(16, thumb.width), height: Math.max(9, thumb.height) },
       fetchWindowIcons: false
     }),
-    foregroundTitle()
+    cachedTitle(titleTtl)
   ])
   const primary = sources.find((source) => source.display_id === String(display.id)) ?? sources[0]
   if (!primary || primary.thumbnail.isEmpty()) return null

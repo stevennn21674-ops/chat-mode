@@ -7,6 +7,7 @@ interface ChatBridge {
   ready(): void
   setIgnoreMouse(ignore: boolean): void
   pointer(payload: PointerEventPayload): void
+  fps(value: number): void
   onMessage(callback: (message: ChatMessage) => void): () => void
   onState(callback: (state: OverlayState) => void): () => void
   onAlert(callback: (alert: AlertBanner) => void): () => void
@@ -168,8 +169,7 @@ function append(message: ChatMessage): void {
     line.append(text)
   }
   log.append(line)
-  while (log.querySelectorAll('.line').length > 80) log.querySelector('.line')?.remove()
-  if (autoScroll && stick) log.scrollTop = log.scrollHeight
+  scheduleScroll()
   updateJump()
   if (message.kind === 'hype') showHype(message)
 }
@@ -201,6 +201,16 @@ function showHype(message: ChatMessage): void {
   }, 18000)
 }
 
+const MAX_CHAT_LINES = 150
+let scrollAt = 0
+function scheduleScroll(): void {
+  while (log.querySelectorAll('.line').length > MAX_CHAT_LINES) log.querySelector('.line')?.remove()
+  const now = performance.now()
+  if (now - scrollAt < 33) return
+  scrollAt = now
+  if (autoScroll && stick) log.scrollTop = log.scrollHeight
+}
+
 function meter(level: number): string {
   return Array.from({ length: 7 }, (_unused, index) => (index < level ? '●' : '○')).join('')
 }
@@ -220,7 +230,7 @@ function applyState(state: OverlayState): void {
   autoScroll = state.autoScroll !== false
   if (!autoScroll) stick = false
   micMeter.classList.toggle('hidden', !state.micLive)
-  micMeterFill.style.width = `${Math.round(Math.max(0, Math.min(1, state.micLevel || 0)) * 100)}%`
+  micMeterFill.style.transform = `scaleX(${Math.max(0, Math.min(1, state.micLevel || 0))})`
   if (state.heardText) {
     heard.textContent = state.heardText
     heard.classList.remove('hidden')
@@ -285,3 +295,16 @@ window.chat.onMessage(append)
 window.chat.onState(applyState)
 window.chat.onAlert(showAlert)
 window.chat.ready()
+
+let fpsFrames = 0
+let fpsStart = 0
+setInterval(() => {
+  fpsStart = performance.now()
+  fpsFrames = 0
+  const sample = (now: number): void => {
+    fpsFrames += 1
+    if (now - fpsStart < 400) requestAnimationFrame(sample)
+    else window.chat.fps(Math.round((fpsFrames * 1000) / (now - fpsStart)))
+  }
+  requestAnimationFrame(sample)
+}, 10000)

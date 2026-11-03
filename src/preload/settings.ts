@@ -45,6 +45,9 @@ contextBridge.exposeInMainWorld('settings', {
   testMic(): Promise<{ ok: boolean; detail: string }> {
     return ipcRenderer.invoke('settings:test-mic')
   },
+  diagnoseMic(): Promise<{ id: string; label: string; pass: boolean; detail: string }[]> {
+    return ipcRenderer.invoke('settings:diagnose-mic')
+  },
   deleteDownloads(): Promise<SettingsView> {
     return ipcRenderer.invoke('brain:delete-all')
   },

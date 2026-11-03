@@ -57,6 +57,9 @@ jobs:
         # array, which electron-builder 26 does not treat as never.
         run: npm run dist:win
 
+      - name: Check unpacked OCR dependencies
+        run: node --experimental-strip-types scripts/check-ocr-unpack.mjs release/win-unpacked/resources/app.asar.unpacked
+
       - name: Zip the portable app
         shell: pwsh
         run: |

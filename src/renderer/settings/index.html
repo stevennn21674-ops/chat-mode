@@ -37,11 +37,27 @@
           Microphone
           <select id="mic"></select>
         </label>
-        <p class="hint">Uses the Windows default until you pick another device. Speech stays on this PC. Hold V a moment after the last word so it is not cut off.</p>
+        <p class="hint">Uses the Windows default until you pick another device. Virtual cables and stereo mix are skipped unless you pick them. Speech stays on this PC.</p>
+        <label>Talk key
+          <input id="talk-key" type="text" maxlength="1" spellcheck="false" />
+        </label>
+        <label>How you talk
+          <select id="talk-mode">
+            <option value="hold">Hold to talk</option>
+            <option value="toggle">Toggle to talk</option>
+            <option value="vad">Always listening</option>
+          </select>
+        </label>
+        <label class="switch"><input id="talk-fallback" type="checkbox" /> Fallback hotkey if the global hook is unavailable</label>
+        <p class="hint">Hold is the default and works while a game is focused when the hook is running. Key repeat is ignored. Toggle starts and stops on each press. Always listening transcribes when it hears you and stays quiet when the room is silent. The fallback, if the hook cannot start, is Alt plus your talk key so the letter still reaches the game.</p>
         <div class="actions">
           <button id="test-mic" type="button">Test mic</button>
+          <button id="mic-diagnostics" type="button">Mic diagnostics</button>
         </div>
         <p id="mic-test" class="hint"></p>
+        <p id="audio-detail" class="hint"></p>
+        <ul id="mic-stages"></ul>
+        <p class="hint">If the mic stays quiet, open Windows Settings &gt; Privacy &gt; Microphone and allow desktop apps. The overlay only says Audio error. The reason is written here and in voice-debug.log.</p>
         <p class="hint">Hear computer audio is on by default. The last 18 seconds of sound from this PC are transcribed here and added when you press ` or finish talking. Silence is skipped, and it does not make its own request.</p>
         <p id="speech" class="hint"></p>
         <p id="hook" class="hint"></p>
@@ -124,9 +140,23 @@
       </section>
 
       <section class="card">
+        <h2>Performance</h2>
+        <label>Performance mode
+          <select id="performance">
+            <option value="low">Low</option>
+            <option value="balanced">Balanced</option>
+            <option value="high">High</option>
+          </select>
+        </label>
+        <p class="hint">Low is the default. It turns off computer-audio transcription and samples the screen slowly, not every second. Balanced transcribes computer audio about every 45 seconds and skips silence. High is about every 30 seconds. If CPU stays above about 70% for 10 seconds, or the overlay frame rate drops, background work backs off on its own.</p>
+        <label class="switch"><input id="overlay-gpu" type="checkbox" /> Hardware acceleration</label>
+        <p class="hint">On by default. Turn it off only if the chat feels smoother that way. It applies the next time Chat Mode starts, because Windows applies it to the whole app.</p>
+      </section>
+
+      <section class="card">
         <h2>Screen activity</h2>
         <label class="switch"><input id="screen-watch" type="checkbox" /> Watch the screen locally</label>
-        <p class="hint">Every few seconds the app looks at a tiny 64 by 36 thumbnail. It notices motion, cuts, darkness, flashes, and the window title. No picture is uploaded. Chat uses that for lines like a jump scare or a still menu. It pauses while you are idle, slows down when the screen is still, and can skip itself on battery.</p>
+        <p class="hint">The app looks at a tiny thumbnail. It notices motion, cuts, darkness, flashes, and the window title. No picture is uploaded. It pauses while you are idle, when a game is focused and the picture is not changing, when the CPU is high, and on battery if that box is on. Low performance mode waits longer than one second between looks.</p>
         <label class="switch"><input id="pause-battery" type="checkbox" /> Pause screen watch on battery</label>
         <label class="switch"><input id="auto-vision" type="checkbox" /> Auto vision (AI mode only, default off)</label>
         <label>Auto vision cap per hour <output id="vision-out"></output>

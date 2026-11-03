@@ -53,7 +53,7 @@ const MODELS = (catalog as CatalogFile).models
 const PACES: Record<BrainSpeed, BrainPace> = {
   light: { intervalMs: 10_000, maxTokens: 140, batch: 3, threads: 1, cpuSkip: 45, timeoutMs: 16_000 },
   normal: { intervalMs: 8_000, maxTokens: 180, batch: 4, threads: 2, cpuSkip: 70, timeoutMs: 14_000 },
-  heavy: { intervalMs: 6_000, maxTokens: 240, batch: 5, threads: 4, cpuSkip: 90, timeoutMs: 18_000 }
+  heavy: { intervalMs: 6_000, maxTokens: 240, batch: 5, threads: 2, cpuSkip: 70, timeoutMs: 18_000 }
 }
 
 export function modelSpec(size: BrainSize): ModelSpec {
@@ -73,8 +73,8 @@ export function paceFor(speed: BrainSpeed): BrainPace {
 }
 
 export function clampThreads(requested: number, cores: number): number {
-  const room = cores > 2 ? cores - 1 : 1
-  return Math.max(1, Math.min(requested, Math.max(1, room)))
+  const room = cores > 2 ? Math.min(2, cores - 1) : 1
+  return Math.max(1, Math.min(requested, room, 2))
 }
 
 export function brainDecision(input: {
@@ -85,8 +85,10 @@ export function brainDecision(input: {
   now: number
   pace: BrainPace
   force?: boolean
+  throttled?: boolean
 }): 'run' | 'wait' | 'fallback' {
   if (!input.enabled || !input.ready) return 'fallback'
+  if (input.throttled) return 'fallback'
   if (input.cpuPercent !== null && input.cpuPercent >= input.pace.cpuSkip) return 'fallback'
   if (!input.force && input.now - input.lastAt < input.pace.intervalMs) return 'wait'
   return 'run'

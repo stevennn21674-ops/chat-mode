@@ -184,6 +184,18 @@ export class OcrService {
       this.opts.notify()
       return null
     }
+    try {
+      return await this.create(langDir)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'failed'
+      this.opts.log(`on-screen text engine failed: ${message}`)
+      this.note = 'On-screen text failed. Chat is using colors, motion, and the window title instead.'
+      this.opts.notify()
+      return null
+    }
+  }
+
+  private async create(langDir: string): Promise<OcrWorker | null> {
     const imported = (await import('tesseract.js')) as unknown as {
       createWorker?: (lang: string, oem: number, options: Record<string, unknown>) => Promise<OcrWorker>
       default?: { createWorker?: (lang: string, oem: number, options: Record<string, unknown>) => Promise<OcrWorker> }

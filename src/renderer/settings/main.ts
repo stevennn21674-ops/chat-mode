@@ -17,6 +17,7 @@ interface SettingsBridge {
   deleteBrain(): Promise<SettingsView>
   testAlert(): Promise<boolean>
   testMic(): Promise<{ ok: boolean; detail: string }>
+  diagnoseMic(): Promise<{ id: string; label: string; pass: boolean; detail: string }[]>
   deleteDownloads(): Promise<SettingsView>
   onChange(callback: (view: SettingsView) => void): () => void
 }
@@ -38,6 +39,14 @@ const autoScroll = document.querySelector('#auto-scroll') as HTMLInputElement
 const lookScreen = document.querySelector('#look-screen') as HTMLInputElement
 const readScreenText = document.querySelector('#read-screen-text') as HTMLInputElement
 const testMic = document.querySelector('#test-mic') as HTMLButtonElement
+const micDiagnostics = document.querySelector('#mic-diagnostics') as HTMLButtonElement
+const micStages = document.querySelector('#mic-stages') as HTMLElement
+const audioDetail = document.querySelector('#audio-detail') as HTMLElement
+const talkKey = document.querySelector('#talk-key') as HTMLInputElement
+const talkMode = document.querySelector('#talk-mode') as HTMLSelectElement
+const talkFallback = document.querySelector('#talk-fallback') as HTMLInputElement
+const performanceMode = document.querySelector('#performance') as HTMLSelectElement
+const overlayGpu = document.querySelector('#overlay-gpu') as HTMLInputElement
 const micTest = document.querySelector('#mic-test') as HTMLElement
 const ocrNote = document.querySelector('#ocr-note') as HTMLElement
 const diskUsed = document.querySelector('#disk-used') as HTMLElement
@@ -174,7 +183,6 @@ function render(view: SettingsView): void {
   else if (!view.screenReaction) status.textContent = 'Screen reactions are off.'
   else if (!view.aiMode && view.localBrain && view.localBrainReady) status.textContent = 'AI mode is off. Local brain is answering on this PC. Nothing is uploaded.'
   else if (!view.aiMode) status.textContent = 'AI mode is off. Press ` for a local screen read. Nothing is uploaded.'
-  else if (view.analyzing) status.textContent = 'Screen is being analyzed.'
   else if (!view.serviceReady) status.textContent = 'Press ` when a key is saved. Until then the chat stays local.'
   else status.textContent = 'Press ` to send the screen.'
   speech.textContent = view.voiceModelReady
@@ -187,6 +195,12 @@ function render(view: SettingsView): void {
     ? 'Leave this blank to use the built-in connection. A relay sends comments through a server you control.'
     : 'That relay URL is not a valid http(s) address, so it is being ignored.'
   if (mic.value !== view.micDeviceId && document.activeElement !== mic) mic.value = view.micDeviceId
+  if (document.activeElement !== talkKey) talkKey.value = view.talkKey
+  talkMode.value = view.talkMode
+  talkFallback.checked = view.talkFallback
+  performanceMode.value = view.performanceMode
+  overlayGpu.checked = view.overlayGpu
+  audioDetail.textContent = view.audioDetail || (view.micAccess === 'denied' || view.micAccess === 'restricted' ? `Microphone access: ${view.micAccess}. Windows Settings > Privacy > Microphone, allow desktop apps.` : '')
   if (!view.encryptionAvailable) {
     keyHint.textContent = 'This PC cannot encrypt a key, so a typed key will not be saved.'
   } else if (view.hasUserKey && !view.aiMode) {
@@ -281,6 +295,35 @@ testAlert.addEventListener('click', () => void window.settings.testAlert())
 liveConnect.addEventListener('click', () => void window.settings.update({ liveLink: true }))
 liveDisconnect.addEventListener('click', () => void window.settings.update({ liveLink: false }))
 mic.addEventListener('change', () => void window.settings.update({ micDeviceId: mic.value }))
+talkKey.addEventListener('change', () => void window.settings.update({ talkKey: talkKey.value }))
+talkMode.addEventListener('change', () => {
+  if (talkMode.value === 'hold' || talkMode.value === 'toggle' || talkMode.value === 'vad') {
+    void window.settings.update({ talkMode: talkMode.value })
+  }
+})
+talkFallback.addEventListener('change', () => void window.settings.update({ talkFallback: talkFallback.checked }))
+performanceMode.addEventListener('change', () => {
+  if (performanceMode.value === 'low' || performanceMode.value === 'balanced' || performanceMode.value === 'high') {
+    void window.settings.update({ performanceMode: performanceMode.value })
+  }
+})
+overlayGpu.addEventListener('change', () => void window.settings.update({ overlayGpu: overlayGpu.checked }))
+micDiagnostics.addEventListener('click', () => {
+  micDiagnostics.disabled = true
+  micTest.textContent = 'Checking the microphone…'
+  void window.settings.diagnoseMic().then((stages) => {
+    micStages.replaceChildren(
+      ...stages.map((stage) => {
+        const item = document.createElement('li')
+        item.textContent = `${stage.pass ? 'PASS' : 'FAIL'} ${stage.label}: ${stage.detail}`
+        return item
+      })
+    )
+    micTest.textContent = stages.every((stage) => stage.pass) ? 'Mic diagnostics passed.' : 'Mic diagnostics found a problem. Details are listed above.'
+  }).finally(() => {
+    micDiagnostics.disabled = false
+  })
+})
 speed.addEventListener('input', () => {
   speedOut.textContent = `${speed.value} / 7`
   void window.settings.update({ speedLevel: Number(speed.value) })

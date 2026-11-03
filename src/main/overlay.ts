@@ -92,12 +92,13 @@ export class OverlayController {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
-        backgroundThrottling: false
+        backgroundThrottling: true
       }
     })
+    this.win.webContents.setFrameRate(30)
     this.pin()
     this.win.setContentProtection(true)
-    this.poll = setInterval(() => this.tickPointer(), 16)
+    this.poll = setInterval(() => this.tickPointer(), 33)
     this.win.on('closed', () => clearInterval(this.poll))
   }
 

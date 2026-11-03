@@ -27,9 +27,9 @@ body { pointer-events: none; }
   padding: 10px 10px 8px;
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(12, 14, 18, 0.96);
+  background: #12141a;
   color: #f4f6fb;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
   opacity: var(--panel-opacity);
 }
 
@@ -117,7 +117,7 @@ body { pointer-events: none; }
   border-radius: 12px;
   background: linear-gradient(90deg, rgba(255, 196, 60, 0.95), rgba(255, 122, 69, 0.92));
   color: #1a1204;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  box-shadow: none;
 }
 
 .alert p { margin: 0; }
@@ -135,7 +135,6 @@ body { pointer-events: none; }
   line-height: 1.35;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 14px);
 }
 
 .spacer {
@@ -145,6 +144,7 @@ body { pointer-events: none; }
 
 .line {
   margin: 0 0 5px;
+  contain: layout paint;
   animation: rise 180ms ease-out;
 }
 
@@ -222,7 +222,9 @@ body { pointer-events: none; }
 .meter span {
   display: block;
   height: 100%;
-  width: 0;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
   background: white;
 }
 
@@ -293,8 +295,8 @@ body { pointer-events: none; }
 .hidden { display: none !important; }
 
 @keyframes rise {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
+  from { transform: translateY(6px); }
+  to { transform: translateY(0); }
 }
 
 @keyframes blink {

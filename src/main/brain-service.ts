@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, statfsSync, writeFileSync } from 'node:fs'
-import { cpus, setPriority } from 'node:os'
+import { constants, cpus, setPriority } from 'node:os'
 import { dirname, join } from 'node:path'
 import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -374,7 +374,7 @@ export class BrainService {
     })
     if (child.pid) {
       try {
-        setPriority(child.pid, 19)
+        setPriority(child.pid, constants.priority.PRIORITY_BELOW_NORMAL)
       } catch {
         // --prio -1 still asks llama.cpp to run below normal.
       }

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { constants, setPriority } from 'node:os'
 import { dirname } from 'node:path'
 import { parseWhisperStdout } from '../shared/whisper'
 
@@ -42,6 +43,16 @@ function transcribeNow(bin: string, model: string, wavPath: string, timeoutMs: n
       cwd: dirname(bin),
       windowsHide: true
     })
+    const lower = (): void => {
+      if (!child.pid) return
+      try {
+        setPriority(child.pid, constants.priority.PRIORITY_BELOW_NORMAL)
+      } catch {
+        // The process can exit before the priority change lands.
+      }
+    }
+    child.on('spawn', lower)
+    lower()
     let out = ''
     let err = ''
     const timer = setTimeout(() => {

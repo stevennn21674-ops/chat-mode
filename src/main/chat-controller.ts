@@ -25,6 +25,8 @@ import { usableTranscript } from '../shared/speech'
 import { frameUnchanged } from '../shared/frame-diff'
 import { makeFallbackMessages } from '../shared/fallback'
 import { brainDecision, paceFor, polishBrainLines, type BrainTurn } from '../shared/brain'
+import { OVERLAY_AUDIO_ERROR } from '../shared/mic'
+import { effectiveMode, perfProfile } from '../shared/performance'
 import { echoWords, makeLocalMessages } from '../shared/local-chat'
 import { ingest, lookupCandidate, referenceLine, compactContext, createKnowledge, type Knowledge } from '../shared/knowledge'
 import { createMemory, detectIntent, noteText, recentTopics, type TermMemory } from '../shared/nlu'
@@ -62,6 +64,7 @@ interface ControllerDeps {
     cpu: () => number | null
     generate: (turn: BrainTurn) => Promise<ChatMessage[] | null>
   }
+  throttled?: () => boolean
   sendAlert?: (alert: AlertBanner) => void
   liveLines?: () => string[]
 }
@@ -87,6 +90,7 @@ export class ChatController {
   private heardText: string | null = null
   private heardTimer: NodeJS.Timeout | null = null
   private micFault: string | null = null
+  private audioDetailText = ''
   private faultTimer: NodeJS.Timeout | null = null
   private micLevel = 0
   private voiceFrame: { jpegBase64: string; hash: string; colors?: string[]; title?: string | null; scene?: SceneCue } | null = null
@@ -187,10 +191,15 @@ export class ChatController {
     this.onState(this.snapshot())
   }
 
+  audioDetail(): string {
+    return this.audioDetailText
+  }
+
   setMicFault(reason: string): void {
-    const text = reason.startsWith('mic not working:') ? reason : `mic not working: ${reason}`
-    this.micFault = text.slice(0, 180)
-    this.deps.logVoice?.(this.micFault)
+    const text = reason.trim().slice(0, 400) || 'microphone failed'
+    this.audioDetailText = text
+    this.micFault = OVERLAY_AUDIO_ERROR
+    this.deps.logVoice?.(text)
     this.publish()
     if (this.faultTimer) clearTimeout(this.faultTimer)
     this.faultTimer = setTimeout(() => {
@@ -222,6 +231,7 @@ export class ChatController {
     ingest(this.knowledge, raw, 'mic', now)
     const command = parseModCommand(raw)
     this.deps.logVoice?.(`${raw} => ${command ? formatModCommand(command) : 'none'}`)
+    this.audioDetailText = ''
     this.showHeard(raw)
     if (command) {
       this.enforce(command)
@@ -457,7 +467,8 @@ export class ChatController {
       lastAt: this.brainAt,
       now: Date.now(),
       pace: paceFor(settings.brainSpeed),
-      force: true
+      force: true,
+      throttled: this.deps.throttled?.() ?? false
     })
     if (decision !== 'run') return
     this.brainBusy = true
@@ -518,7 +529,7 @@ export class ChatController {
   async listenAmbient(): Promise<void> {
     if (!this.alive || this.busy || this.brainBusy) return
     const settings = this.deps.getSettings()
-    if (!settings.enabled || !settings.hearComputerAudio) return
+    if (!settings.enabled || !this.allowPc(settings)) return
     this.busy = true
     try {
       const before = this.pcLines.at(-1) ?? ''
@@ -1034,8 +1045,13 @@ export class ChatController {
     if (this.pcLines.length > 3) this.pcLines.shift()
   }
 
+  private allowPc(settings: AppSettings): boolean {
+    if (!settings.hearComputerAudio) return false
+    return perfProfile(effectiveMode(settings.performanceMode, this.deps.throttled?.() ?? false)).loopback
+  }
+
   private async heardAudio(settings: AppSettings): Promise<string[]> {
-    if (!settings.hearComputerAudio) return []
+    if (!this.allowPc(settings)) return []
     const clip = await this.deps.pcAudio()
     this.loud = clip.loud
     const raw = clip.text.trim().slice(0, 400)
@@ -1073,7 +1089,8 @@ export class ChatController {
       cpuPercent: this.deps.brain?.cpu() ?? null,
       lastAt: this.brainAt,
       now: Date.now(),
-      pace: paceFor(settings.brainSpeed)
+      pace: paceFor(settings.brainSpeed),
+      throttled: this.deps.throttled?.() ?? false
     })
   }
 
@@ -1160,7 +1177,7 @@ export class ChatController {
           await this.readOcr(frame)
         }
       }
-      if (settings.hearComputerAudio && (voice || signal)) {
+      if (this.allowPc(settings) && (voice || signal)) {
         if (controller.signal.aborted || !this.alive) return
         await this.heardAudio(settings)
       }
@@ -1230,7 +1247,7 @@ export class ChatController {
         return
       }
       let pcAudio: string[] = []
-      if (settings.hearComputerAudio) {
+      if (this.allowPc(settings)) {
         pcAudio = await this.heardAudio(settings)
         if (controller.signal.aborted || !this.alive) return
       }

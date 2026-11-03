@@ -1,4 +1,5 @@
 import { DEFAULT_BASE_URL, DEFAULT_MODEL } from './service-defaults'
+import { normalizeTalkKey } from './mic'
 import { LIMITS, type AppSettings } from './types'
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -51,7 +52,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   screenWatch: true,
   autoVision: false,
   autoVisionPerHour: 6,
-  pauseWatchOnBattery: true
+  pauseWatchOnBattery: true,
+  performanceMode: 'low',
+  overlayGpu: true,
+  talkKey: 'V',
+  talkMode: 'hold',
+  talkFallback: true
 }
 
 function finiteNumber(value: unknown): number | null {
@@ -159,6 +165,13 @@ export function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   if (typeof raw.screenWatch === 'boolean') next.screenWatch = raw.screenWatch
   if (typeof raw.autoVision === 'boolean') next.autoVision = raw.autoVision
   if (typeof raw.pauseWatchOnBattery === 'boolean') next.pauseWatchOnBattery = raw.pauseWatchOnBattery
+  if (raw.performanceMode === 'low' || raw.performanceMode === 'balanced' || raw.performanceMode === 'high') {
+    next.performanceMode = raw.performanceMode
+  }
+  if (typeof raw.overlayGpu === 'boolean') next.overlayGpu = raw.overlayGpu
+  if (typeof raw.talkKey === 'string') next.talkKey = normalizeTalkKey(raw.talkKey)
+  if (raw.talkMode === 'hold' || raw.talkMode === 'toggle' || raw.talkMode === 'vad') next.talkMode = raw.talkMode
+  if (typeof raw.talkFallback === 'boolean') next.talkFallback = raw.talkFallback
   if (raw.alertFrequency === 'rare' || raw.alertFrequency === 'normal' || raw.alertFrequency === 'often') {
     next.alertFrequency = raw.alertFrequency
   }

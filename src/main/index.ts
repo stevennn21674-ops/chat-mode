@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, desktopCapturer, dialog, globalShortcut, ipcMain, net, powerMonitor, session, screen, type OpenDialogOptions, type SaveDialogOptions } from 'electron'
+import { app, BrowserWindow, Menu, desktopCapturer, dialog, globalShortcut, ipcMain, net, powerMonitor, session, screen, systemPreferences, type OpenDialogOptions, type SaveDialogOptions } from 'electron'
 import type { Input } from 'electron'
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -10,8 +10,11 @@ import { aiModeSpecified, canReachService, defaultAiMode, usableProxyUrl } from 
 import { startupStateReady } from '../shared/startup'
 import { readSettingsFile } from '../shared/settings-file'
 import { resolveService } from '../shared/service-defaults'
+import { chooseMicrophone, describeMicFailure, normalizeTalkKey } from '../shared/mic'
+import { cpuAverage, effectiveMode, perfProfile, shouldThrottle } from '../shared/performance'
 import { PAUSE_HOTKEY, TALK_KEY, type ChatMessage, type MicDevice, type OverlayState, type SettingsView } from '../shared/types'
 import { BrainService } from './brain-service'
+import { installCrashGuard, setCrashNotify } from './crash-guard'
 import { directoryBytes, fileBytes } from './disk'
 import { OcrService } from './ocr-service'
 import { ChatController } from './chat-controller'
@@ -32,7 +35,24 @@ import { asFloat32, TalkController } from './talk'
 import { createTray } from './tray'
 import { UsageStore } from './usage-store'
 
+installCrashGuard(dialog)
+
 let lastInputAt = Date.now()
+const cpuWindow: number[] = []
+let overlayFps: number | null = null
+
+function throttledNow(): boolean {
+  return shouldThrottle(cpuAverage(cpuWindow), overlayFps)
+}
+
+function overlayGpuEnabled(): boolean {
+  try {
+    const raw = JSON.parse(readFileSync(settingsFile(), 'utf8')) as { overlayGpu?: unknown }
+    return raw.overlayGpu !== false
+  } catch {
+    return true
+  }
+}
 
 function noteActivity(): void {
   lastInputAt = Date.now()
@@ -82,6 +102,8 @@ const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
 } else {
+  if (!overlayGpuEnabled()) app.disableHardwareAcceleration()
+  app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
   app.setName('Chat Mode')
   app.on('second-instance', () => {
     settingsWindow?.show()
@@ -123,13 +145,23 @@ async function bootstrap(): Promise<void> {
       .catch(() => callback(null))
   }, { useSystemPicker: false })
 
+  let controllerRef: ChatController | null = null
   setVoiceDebugFile(voiceDebugFile())
+  setCrashNotify((line) => {
+    logVoiceDebug(line)
+    try {
+      controllerRef?.setMicFault(line)
+    } catch {
+      // The overlay is not up yet.
+    }
+  })
   const settingsPath = settingsFile()
   const specifiedAiMode = aiModeSpecified(readRawSettings(settingsPath))
   const store = new SettingsStore(settingsPath, readSettingsFile(settingsPath))
   const credentials = new CredentialStore(credentialsFile())
   const youtubeKeys = new CredentialStore(youtubeKeyFile())
   let liveStatus = 'Not connected'
+  let micAccess = 'unknown'
   let liveRef: LiveChat | null = null
   if (specifiedAiMode === null) {
     const hasKey = credentials.get().length > 0 || getServiceConfig().apiKey.length > 0
@@ -183,13 +215,14 @@ async function bootstrap(): Promise<void> {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      backgroundThrottling: false
+      backgroundThrottling: false,
+      autoplayPolicy: 'no-user-gesture-required'
     }
   })
   guard(voice)
   const loopback = new LoopbackController(voice, log)
   voice.webContents.on('did-finish-load', () => {
-    loopback.setEnabled(store.settings.hearComputerAudio)
+    syncRuntime()
   })
   loadPage(voice, 'voice')
 
@@ -240,8 +273,18 @@ async function bootstrap(): Promise<void> {
       chatRef.win.webContents.send('overlay:alert', alert)
     },
     liveLines: () => liveRef?.recent() ?? [],
-    ocr: (jpeg, hash) => ocr.read(jpeg, hash)
+    ocr: async (jpeg, hash) => {
+      try {
+        return await ocr.read(jpeg, hash)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'on-screen text failed'
+        logVoiceDebug(`on-screen text failed: ${message}`)
+        return ''
+      }
+    },
+    throttled: throttledNow
   })
+  controllerRef = controller
 
   const overlay = new OverlayController(
     placeOverlay(store.settings),
@@ -273,7 +316,8 @@ async function bootstrap(): Promise<void> {
     getSettings: () => store.settings,
     power: powerState,
     onActivity: (event) => controller.noteActivity(event),
-    log
+    log,
+    throttled: throttledNow
   })
 
   const talk = new TalkController({
@@ -281,6 +325,7 @@ async function bootstrap(): Promise<void> {
     voiceEnabled: () => store.settings.voiceEnabled,
     chatEnabled: () => store.settings.enabled,
     deviceId: () => store.settings.micDeviceId,
+    mode: () => store.settings.talkMode,
     onLive: (live) => controller.setMicLive(live),
     onLevel: (level) => controller.setMicLevel(level),
     onNote: (note) => controller.setMicNote(note),
@@ -345,8 +390,9 @@ async function bootstrap(): Promise<void> {
   }
 
   function flashCapture(): void {
-    captureHintUntil = Date.now() + 1400
-    tray.tray.setToolTip(statusText())
+    const now = Date.now()
+    if (now < captureHintUntil) return
+    captureHintUntil = now + 400
     tray.flash()
   }
 
@@ -393,16 +439,54 @@ async function bootstrap(): Promise<void> {
       ocrNote: ocr.status(),
       youtubeApiKey: includeKey ? youtubeKeys.get() : '',
       hasYoutubeKey: youtubeKeys.get().length > 0,
-      liveStatus
+      liveStatus,
+      audioDetail: controller.audioDetail(),
+      micAccess: micAccess
     }
+  }
+
+  function loopbackWanted(): boolean {
+    return store.settings.hearComputerAudio && perfProfile(effectiveMode(store.settings.performanceMode, throttledNow())).loopback
+  }
+
+  function syncRuntime(): void {
+    loopback.setEnabled(loopbackWanted())
+    const vad = store.settings.enabled && store.settings.voiceEnabled && store.settings.talkMode === 'vad'
+    const nextArm = `${vad ? 'vad' : 'off'}:${store.settings.micDeviceId}`
+    if (nextArm !== armKey && !voice.isDestroyed()) {
+      armKey = nextArm
+      voice.webContents.send('voice:command', {
+        type: 'arm',
+        deviceId: store.settings.micDeviceId,
+        mode: vad ? 'vad' : 'off'
+      })
+    }
+    syncFallback()
+  }
+
+  function reconcileMic(devices: MicDevice[]): void {
+    const next = chooseMicrophone(devices, store.settings.micDeviceId)
+    if (next === store.settings.micDeviceId) return
+    store.update({ micDeviceId: next })
+    syncRuntime()
+  }
+
+  let fallbackAccel = ''
+  let armKey = ''
+  function syncFallback(): void {
+    const accel = hookReady || !store.settings.talkFallback ? '' : `Alt+${normalizeTalkKey(store.settings.talkKey)}`
+    if (accel === fallbackAccel) return
+    if (fallbackAccel) globalShortcut.unregister(fallbackAccel)
+    fallbackAccel = ''
+    if (!accel) return
+    if (globalShortcut.register(accel, () => talk.fallbackPress())) fallbackAccel = accel
+    else logVoiceDebug(`fallback hotkey ${accel} did not register`)
   }
 
   function statusText(): string {
     const offline = effectivelyOffline(store.settings.offlineMode, reachable) ? ' — offline' : ''
     if (!store.settings.enabled) return `Chat Mode is hidden${offline}`
     if (store.settings.capturePaused) return `Chat Mode — capture paused${offline}`
-    if (Date.now() < captureHintUntil) return `Chat Mode — reading the screen${offline}`
-    if (controller.snapshot().analyzing) return `Chat Mode — screen is being analyzed${offline}`
     return `Chat Mode${offline}`
   }
 
@@ -507,6 +591,9 @@ async function bootstrap(): Promise<void> {
   ipcMain.on('overlay:pointer', (_event, payload: unknown) => {
     if (isPointer(payload)) overlay.pointer(payload)
   })
+  ipcMain.on('overlay:fps', (_event, value: unknown) => {
+    if (typeof value === 'number' && Number.isFinite(value)) overlayFps = value
+  })
   ipcMain.handle('settings:get', () => view(true))
   ipcMain.handle('settings:set-key', (_event, key: unknown) => {
     if (typeof key !== 'string') return { ...view(false), keySaved: false }
@@ -529,7 +616,6 @@ async function bootstrap(): Promise<void> {
   })
   ipcMain.handle('settings:update', (_event, patch: unknown) => {
     const before = store.settings.launchAtStartup
-    const heard = store.settings.hearComputerAudio
     const readText = store.settings.readScreenText
     if (patch && typeof patch === 'object' && typeof (patch as { capturePaused?: unknown }).capturePaused === 'boolean') {
       controller.setCapturePaused((patch as { capturePaused: boolean }).capturePaused)
@@ -540,7 +626,7 @@ async function bootstrap(): Promise<void> {
     store.update(patch)
     brain.onSettings()
     if (store.settings.launchAtStartup !== before) applyLogin(store.settings.launchAtStartup)
-    if (store.settings.hearComputerAudio !== heard) loopback.setEnabled(store.settings.hearComputerAudio)
+    syncRuntime()
     if (store.settings.readScreenText && !readText) void ocr.prepare()
     refresh()
     return view(false)
@@ -549,7 +635,11 @@ async function bootstrap(): Promise<void> {
     resetPosition()
     return view()
   })
-  ipcMain.handle('settings:mics', () => listMics(voice))
+  ipcMain.handle('settings:mics', async () => {
+    const devices = await listMics(voice)
+    reconcileMic(devices)
+    return devices
+  })
   ipcMain.handle('alerts:test', () => {
     controller.testDonation()
     return true
@@ -576,7 +666,18 @@ async function bootstrap(): Promise<void> {
     refresh()
     return result
   })
-  ipcMain.handle('settings:test-mic', () => talk.testMic())
+  ipcMain.handle('settings:test-mic', async () => {
+    const result = await talk.testMic()
+    syncRuntime()
+    return result
+  })
+  ipcMain.handle('settings:diagnose-mic', async () => {
+    const devices = await listMics(voice)
+    reconcileMic(devices)
+    const stages = await talk.diagnose({ access: micAccess, hookReady, devices })
+    syncRuntime()
+    return stages
+  })
   ipcMain.handle('brain:delete-all', async () => {
     const parent = settingsWindow && !settingsWindow.isDestroyed() ? settingsWindow : undefined
     const options = {
@@ -647,7 +748,7 @@ async function bootstrap(): Promise<void> {
     const encoding = record?.encoding === 'f32le' ? 'f32le' : undefined
     const pcm = asFloat32(record?.pcm, encoding)
     const sampleRate = typeof record?.sampleRate === 'number' ? record.sampleRate : 0
-    const purpose = record?.purpose === 'test' ? 'test' : 'talk'
+    const purpose = record?.purpose === 'test' ? 'test' : record?.purpose === 'diagnose' ? 'diagnose' : 'talk'
     if (!pcm || sampleRate <= 0) {
       talk.fail('recording was empty')
       return
@@ -658,8 +759,13 @@ async function bootstrap(): Promise<void> {
     if (typeof level === 'number') talk.level(level)
   })
   ipcMain.on('voice:error', (_event, code: unknown) => {
-    const reason = code === 'denied' ? 'microphone permission denied' : code === 'empty' ? 'no sound from the microphone' : 'microphone failed to open'
-    talk.fail(reason)
+    const record = code && typeof code === 'object' ? (code as { code?: unknown; detail?: unknown; quiet?: unknown }) : { code }
+    const detail = typeof record.detail === 'string' ? record.detail : describeMicFailure(String(record.code ?? ''), '').detail
+    if (record.quiet) {
+      logVoiceDebug(detail)
+      return
+    }
+    talk.fail(detail)
   })
   let pcAudioNoted = false
   ipcMain.on('voice:pc-audio', () => {
@@ -679,8 +785,8 @@ async function bootstrap(): Promise<void> {
     if (!controller.requestScreen()) return
     flashCapture()
   }
-  bindLocalTalk(overlay.win, talk, onCaptureKey)
-  bindLocalTalk(voice, talk, onCaptureKey)
+  bindLocalTalk(overlay.win, talk, onCaptureKey, () => store.settings.talkKey)
+  bindLocalTalk(voice, talk, onCaptureKey, () => store.settings.talkKey)
 
   const registered = globalShortcut.register('CommandOrControl+Shift+F8', () => {
     controller.toggleCapture()
@@ -690,10 +796,20 @@ async function bootstrap(): Promise<void> {
 
   hookReady = await startHook(
     talk,
+    () => store.settings.talkKey,
     () => overlay.endGesture(),
     (button) => overlay.mouseDown(button),
     onCaptureKey
   )
+  syncFallback()
+  void ensureMicPermission().then((status) => {
+    micAccess = status
+    if (status === 'denied' || status === 'restricted') {
+      const failure = describeMicFailure('NotAllowedError', status)
+      logVoiceDebug(failure.detail)
+      controller.setMicFault(failure.detail)
+    }
+  })
   controller.start(publish)
   screenWatch.start()
   live.sync()
@@ -712,9 +828,24 @@ async function bootstrap(): Promise<void> {
     if (!overlay.win.isDestroyed() && overlay.win.isVisible() && (game || pinTick % 2 === 0)) overlay.pin()
     tray.tray.setToolTip(statusText())
   }, 1000)
+  let ambientAt = 0
+  let loopWas = loopbackWanted()
   setInterval(() => {
+    const sample = brain.cpu()
+    if (sample !== null) {
+      cpuWindow.push(sample)
+      if (cpuWindow.length > 5) cpuWindow.shift()
+    }
+    const nextLoop = loopbackWanted()
+    if (nextLoop !== loopWas) {
+      loopWas = nextLoop
+      loopback.setEnabled(nextLoop)
+    }
+    const profile = perfProfile(effectiveMode(store.settings.performanceMode, throttledNow()))
+    if (!profile.loopback || Date.now() - ambientAt < profile.loopbackEveryMs) return
+    ambientAt = Date.now()
     void controller.listenAmbient()
-  }, 22000)
+  }, 5000)
   void probe()
   setInterval(() => {
     void probe()
@@ -810,7 +941,7 @@ function listMics(voice: BrowserWindow): Promise<MicDevice[]> {
   })
 }
 
-function bindLocalTalk(win: BrowserWindow, talk: TalkController, onCapture: () => void): void {
+function bindLocalTalk(win: BrowserWindow, talk: TalkController, onCapture: () => void, talkKey: () => string): void {
   let graveHeld = false
   win.webContents.on('before-input-event', (event, input) => {
     if (hookReady) return
@@ -823,30 +954,46 @@ function bindLocalTalk(win: BrowserWindow, talk: TalkController, onCapture: () =
       if (input.type === 'keyUp') graveHeld = false
       return
     }
-    if (!isPlainV(input)) return
+    if (!isPlainTalk(input, talkKey())) return
     event.preventDefault()
     if (input.type === 'keyDown' && !input.isAutoRepeat) talk.keyDown()
     if (input.type === 'keyUp') talk.keyUp()
   })
 }
 
-function isPlainV(input: Input): boolean {
-  return input.key.toLowerCase() === 'v' && !input.control && !input.alt && !input.meta
+function isPlainTalk(input: Input, key: string): boolean {
+  return input.key.toLowerCase() === normalizeTalkKey(key).toLowerCase() && !input.control && !input.alt && !input.meta
 }
 
 function isPlainGrave(input: Input): boolean {
   return input.code === 'Backquote' && !input.control && !input.alt && !input.meta && !input.shift
 }
 
+async function ensureMicPermission(): Promise<string> {
+  try {
+    const status = systemPreferences.getMediaAccessStatus('microphone')
+    if (process.platform === 'darwin' && status !== 'granted') {
+      const ok = await systemPreferences.askForMediaAccess('microphone')
+      return ok ? 'granted' : 'denied'
+    }
+    return status
+  } catch {
+    return 'unknown'
+  }
+}
+
 async function startHook(
   talk: TalkController,
+  talkKey: () => string,
   endGesture: () => void,
   onMouseDown: (button: 'left' | 'right') => void,
   onCapture: () => void
 ): Promise<boolean> {
   try {
     const { uIOhook, UiohookKey } = await import('uiohook-napi')
+    const codes = UiohookKey as Record<string, number>
     let graveHeld = false
+    let talkHeld = false
     uIOhook.on('keydown', (event) => {
       noteActivity()
       const plain = !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
@@ -857,7 +1004,10 @@ async function startHook(
         }
         return
       }
-      if (event.keycode !== UiohookKey.V || event.ctrlKey || event.altKey || event.metaKey) return
+      const code = codes[normalizeTalkKey(talkKey())]
+      if (event.keycode !== code || event.ctrlKey || event.altKey || event.metaKey) return
+      if (talkHeld) return
+      talkHeld = true
       talk.keyDown()
     })
     uIOhook.on('mousemove', () => noteActivity())
@@ -868,7 +1018,11 @@ async function startHook(
     })
     uIOhook.on('keyup', (event) => {
       if (event.keycode === UiohookKey.Backquote) graveHeld = false
-      if (event.keycode === UiohookKey.V) talk.keyUp()
+      const code = codes[normalizeTalkKey(talkKey())]
+      if (event.keycode === code) {
+        talkHeld = false
+        talk.keyUp()
+      }
     })
     uIOhook.on('mouseup', () => endGesture())
     uIOhook.start()

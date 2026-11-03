@@ -1,7 +1,9 @@
+import { effectiveMode, perfProfile } from '../shared/performance'
 import type { AppSettings } from '../shared/types'
 import { captureWatchFrame } from './capture'
 import {
   classifyActivity,
+  detectGame,
   sampleFrame,
   shouldSample,
   watchIntervalMs,
@@ -24,6 +26,7 @@ export class ScreenWatch {
       power: () => { idle: boolean; onBattery: boolean }
       onActivity: (event: ActivityEvent) => void
       log: (message: string) => void
+      throttled?: () => boolean
     }
   ) {}
 
@@ -50,27 +53,38 @@ export class ScreenWatch {
     if (!this.alive) return
     const settings = this.deps.getSettings()
     const power = this.deps.power()
+    const profile = perfProfile(effectiveMode(settings.performanceMode, this.deps.throttled?.() ?? false))
     if (!shouldSample({
       enabled: settings.screenWatch,
       chatEnabled: settings.enabled,
       onBattery: power.onBattery,
       pauseOnBattery: settings.pauseWatchOnBattery,
-      idle: power.idle
+      idle: power.idle,
+      cpuHigh: this.deps.throttled?.() ?? false
     })) {
-      this.schedule(8000)
+      this.schedule(profile.watchStillMs)
       return
     }
     try {
-      const frame = await captureWatchFrame()
+      const frame = await captureWatchFrame(profile.thumb, profile.titleCacheMs)
       if (!this.alive || !frame) {
-        this.schedule(watchIntervalMs(this.still))
+        this.schedule(watchIntervalMs(this.still, profile.watchBaseMs, profile.watchStillMs))
         return
       }
       const sample = sampleFrame(frame.bgra, this.previous)
+      const previousSample = this.prevSample
       this.still = sample.motion < 0.02 ? this.still + 1 : 0
+      const unchanged = sample.motion < 0.02
+      const game = detectGame(frame.title)
+      this.previous = frame.bgra
+      this.prevSample = sample
+      if (game && unchanged && this.still >= 2) {
+        this.schedule(profile.watchStillMs)
+        return
+      }
       const event = classifyActivity({
         sample,
-        previous: this.prevSample,
+        previous: previousSample,
         title: frame.title,
         stillFrames: this.still,
         at: Date.now()
@@ -82,11 +96,10 @@ export class ScreenWatch {
         this.lastEmit = Date.now()
         this.deps.onActivity(event)
       }
-      this.previous = frame.bgra
-      this.prevSample = sample
     } catch {
       this.deps.log('screen watch failed')
     }
-    this.schedule(watchIntervalMs(this.still))
+    const pace = perfProfile(effectiveMode(this.deps.getSettings().performanceMode, this.deps.throttled?.() ?? false))
+    this.schedule(watchIntervalMs(this.still, pace.watchBaseMs, pace.watchStillMs))
   }
 }

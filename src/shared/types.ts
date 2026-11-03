@@ -5,6 +5,8 @@ export type MessageKind = 'chat' | 'donation' | 'sub' | 'bits' | 'gift' | 'raid'
 export type AlertFrequency = 'rare' | 'normal' | 'often'
 export type SoundPack = 'coin' | 'chime' | 'arcade' | 'horn'
 export type ChatMix = 'real' | 'mixed'
+export type PerformanceMode = 'low' | 'balanced' | 'high'
+export type TalkMode = 'hold' | 'toggle' | 'vad'
 
 export interface ChatMessage {
   id: string
@@ -71,6 +73,11 @@ export interface AppSettings {
   autoVision: boolean
   autoVisionPerHour: number
   pauseWatchOnBattery: boolean
+  performanceMode: PerformanceMode
+  overlayGpu: boolean
+  talkKey: string
+  talkMode: TalkMode
+  talkFallback: boolean
 }
 
 export interface AlertBanner {
@@ -136,6 +143,8 @@ export interface SettingsView extends AppSettings {
   youtubeApiKey: string
   hasYoutubeKey: boolean
   liveStatus: string
+  audioDetail: string
+  micAccess: string
 }
 
 export interface PointerEventPayload {

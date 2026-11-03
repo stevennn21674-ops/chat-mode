@@ -154,17 +154,19 @@ export function shouldSample(input: {
   onBattery: boolean
   pauseOnBattery: boolean
   idle: boolean
+  cpuHigh?: boolean
 }): boolean {
   if (!input.enabled || !input.chatEnabled) return false
   if (input.idle) return false
   if (input.onBattery && input.pauseOnBattery) return false
+  if (input.cpuHigh) return false
   return true
 }
 
-export function watchIntervalMs(stillFrames: number): number {
-  if (stillFrames >= 8) return 15_000
-  if (stillFrames >= 3) return 8_000
-  return 2_500
+export function watchIntervalMs(stillFrames: number, base = 2500, still = 15_000): number {
+  if (stillFrames >= 8) return Math.max(still, 15_000)
+  if (stillFrames >= 3) return Math.max(8000, Math.round((base + still) / 2))
+  return base
 }
 
 export function allowAutoVision(input: {

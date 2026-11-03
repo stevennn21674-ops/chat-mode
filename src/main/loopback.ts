@@ -17,6 +17,7 @@ export class LoopbackController {
   ) {}
 
   setEnabled(on: boolean): void {
+    if (this.enabled === on) return
     this.enabled = on
     if (this.voice.isDestroyed()) return
     this.voice.webContents.send('voice:command', { type: on ? 'loopback-start' : 'loopback-stop' })

@@ -88,6 +88,14 @@ export function downsample(input: Float32Array, inRate: number, outRate: number)
   return out
 }
 
+export function trimSpeech(samples: Float32Array, sampleRate: number): Float32Array {
+  const trimmed = trimSilence(samples, sampleRate, 0.006)
+  const min = Math.floor(sampleRate * 0.2)
+  if (trimmed.length >= min) return trimmed
+  if (samples.length >= min && pcmRms(samples) >= 0.004) return samples
+  return trimmed
+}
+
 export function trimSilence(samples: Float32Array, sampleRate: number, threshold = SILENCE_RMS): Float32Array {
   if (!samples.length || sampleRate <= 0) return samples
   const frame = Math.max(1, Math.floor(sampleRate * 0.02))
